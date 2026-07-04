@@ -130,33 +130,10 @@
 
   function executeCode(id, context, code) {
     if (context === "page") {
-      const wrappedCode = `
-        (async function() {
-          const __boss_id__ = ${JSON.stringify(id)};
-          try {
-            const result = await (async function() { ${code} })();
-            window.dispatchEvent(new CustomEvent('__boss_result', {
-              detail: {
-                id: __boss_id__,
-                data: JSON.parse(JSON.stringify(result)),
-                error: null
-              }
-            }));
-          } catch(e) {
-            window.dispatchEvent(new CustomEvent('__boss_result', {
-              detail: {
-                id: __boss_id__,
-                data: null,
-                error: e.toString() + '\\\\n' + (e.stack || '')
-              }
-            }));
-          }
-        })();
-      `;
       const el = document.createElement("script");
-      el.textContent = `(${wrappedCode})();`;
+      el.src = `http://127.0.0.1:8765/exec/${encodeURIComponent(id)}`;
+      el.onload = () => el.remove();
       document.documentElement.appendChild(el);
-      el.remove();
     } else if (context === "gm") {
       (async function () {
         try {

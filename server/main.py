@@ -7,6 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from starlette.responses import Response
 import uvicorn
 
 from server.registry import TabRegistry
@@ -156,6 +157,19 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
             logger.error("[!] 控制WS异常: %s", e)
         finally:
             registry.remove_control_client(ws)
+
+    # ── Script execution endpoint (bypass CSP) ─────────────────
+
+    @app.get("/exec/{cmd_id}")
+    async def serve_exec_script(cmd_id: str):
+        script = registry.get_pending_script(cmd_id)
+        if script is None:
+            return Response(
+                content="console.error('[BossRemote] 脚本未找到或已过期:', " +
+                        json.dumps(cmd_id) + ");",
+                media_type="application/javascript",
+            )
+        return Response(content=script, media_type="application/javascript")
 
     return app
 

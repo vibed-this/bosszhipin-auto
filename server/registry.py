@@ -21,6 +21,7 @@ class TabRegistry:
         self._tabs: dict[str, dict[str, Any]] = {}
         self._connections: dict[str, WebSocket] = {}
         self._pending: dict[str, asyncio.Future] = {}
+        self._pending_scripts: dict[str, str] = {}
         self._control_clients: list[WebSocket] = []
         self._event_handlers: dict[str, list[Callable]] = {}
 
@@ -93,6 +94,7 @@ class TabRegistry:
             if not fut.done():
                 fut.set_exception(ConnectionError(f"标签 {tab_id[:8]} 已断开"))
             self._pending.pop(cid, None)
+            self._pending_scripts.pop(cid, None)
         self._broadcast({"type": "tab_disconnected", "tabId": tab_id})
         if info:
             logger.info("[-] 标签注销: %s - %s", tab_id[:8], info.get("title", ""))
@@ -124,6 +126,7 @@ class TabRegistry:
         loop = asyncio.get_running_loop()
         fut = loop.create_future()
         self._pending[cmd_id] = fut
+        self._pending_scripts[cmd_id] = code
 
         payload = {
             "type": "execute",
@@ -137,6 +140,7 @@ class TabRegistry:
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
             self._pending.pop(cmd_id, None)
+            self._pending_scripts.pop(cmd_id, None)
             raise TimeoutError(f"执行超时 ({timeout}s)")
 
     async def send_simple(
@@ -182,12 +186,45 @@ class TabRegistry:
         return await self.send_simple(tab_id, "activate", timeout=timeout)
 
     def resolve_result(self, cmd_id: str, data: Any, error: str | None) -> None:
+        self._pending_scripts.pop(cmd_id, None)
         fut = self._pending.pop(cmd_id, None)
         if fut is not None and not fut.done():
             if error:
                 fut.set_exception(Exception(error))
             else:
                 fut.set_result(data)
+
+    def get_pending_script(self, cmd_id: str) -> str | None:
+        code = self._pending_scripts.get(cmd_id)
+        if code is None:
+            return None
+        # 清空避免重复使用
+        self._pending_scripts.pop(cmd_id, None)
+        # 构造绕过 CSP 的包装脚本
+        escaped_id = json.dumps(cmd_id)
+        return f"""
+(async function() {{
+  const __boss_id__ = {escaped_id};
+  try {{
+    const result = await (async function() {{ {code} }})();
+    window.dispatchEvent(new CustomEvent('__boss_result', {{
+      detail: {{
+        id: __boss_id__,
+        data: JSON.parse(JSON.stringify(result)),
+        error: null
+      }}
+    }}));
+  }} catch(e) {{
+    window.dispatchEvent(new CustomEvent('__boss_result', {{
+      detail: {{
+        id: __boss_id__,
+        data: null,
+        error: e.toString() + '\\\\n' + (e.stack || '')
+      }}
+    }}));
+  }}
+}})();
+"""
 
     # ── control clients ─────────────────────────────────────────
 
