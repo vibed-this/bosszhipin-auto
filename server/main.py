@@ -103,11 +103,10 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
                 raw = await ws.receive_text()
                 msg = json.loads(raw)
 
-                if msg.get("type") == "execute":
-                    tab_id = msg["tabId"]
-                    ctx = msg.get("context", "page")
-                    code = msg.get("code", "")
+                msg_type = msg.get("type", "")
 
+                if msg_type in ("execute", "get_coordinates", "activate"):
+                    tab_id = msg["tabId"]
                     if not registry.is_connected(tab_id):
                         await ws.send_text(
                             json.dumps({
@@ -118,11 +117,24 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
                         continue
 
                     try:
-                        result = await registry.send_execute(tab_id, code, ctx)
+                        if msg_type == "execute":
+                            ctx = msg.get("context", "page")
+                            code = msg.get("code", "")
+                            result = await registry.send_execute(
+                                tab_id, code, ctx
+                            )
+                        elif msg_type == "get_coordinates":
+                            selector = msg.get("selector", "")
+                            result = await registry.send_get_coordinates(
+                                tab_id, selector
+                            )
+                        elif msg_type == "activate":
+                            result = await registry.send_activate(tab_id)
+
                         await ws.send_text(
                             json.dumps({
                                 "type": "result",
-                                "id": uuid.uuid4().hex[:12],
+                                "id": msg.get("id", uuid.uuid4().hex[:12]),
                                 "tabId": tab_id,
                                 "data": result,
                                 "error": None,

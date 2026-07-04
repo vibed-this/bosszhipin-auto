@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import webbrowser
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger("boss.api")
@@ -36,6 +37,22 @@ class RemoteSession:
 
     def __init__(self, registry: "TabRegistry") -> None:
         self._registry = registry
+
+    # ── event subscription ───────────────────────────────────────
+
+    def on(self, event: str, callback: Callable) -> None:
+        """Register a local callback for a registry event.
+
+        See :meth:`TabRegistry.on` for available events.
+        """
+        self._registry.on(event, callback)
+
+    def off(self, event: str, callback: Callable | None = None) -> None:
+        """Unregister a local callback.
+
+        See :meth:`TabRegistry.off`.
+        """
+        self._registry.off(event, callback)
 
     # ── query ─────────────────────────────────────────────────
 
@@ -112,8 +129,40 @@ class RemoteSession:
         code :
             JavaScript source code.
         context :
-            ``"page"`` (browser window) or ``"gm"`` (userscript scope).
+            ``"page"`` (browser window) or ``"gm"`` (extension scope).
         timeout :
             Max seconds to wait for a result.
         """
         return await self._registry.send_execute(tab_id, code, context, timeout)
+
+    # ── coordinates ───────────────────────────────────────────
+
+    async def get_element_coordinates(
+        self,
+        tab_id: str,
+        selector: str,
+        timeout: float = 30.0,
+    ) -> dict:
+        """Get screen coordinates of a DOM element on a connected tab.
+
+        Returns ``{css: {x, y}, physical: {x, y}, width, height}``
+        where ``css`` are CSS-logical pixels and ``physical`` are
+        system physical pixels (DPI-scaled, for RPA / AutoHotkey).
+        """
+        return await self._registry.send_get_coordinates(tab_id, selector, timeout)
+
+    # ── activate ──────────────────────────────────────────────
+
+    async def activate_tab(
+        self,
+        tab_id: str,
+        timeout: float = 10.0,
+    ) -> bool:
+        """Activate a connected tab: bring its window to front and focus the tab.
+
+        Returns ``True`` on success.
+        """
+        result = await self._registry.send_activate(tab_id, timeout)
+        if isinstance(result, dict):
+            return result.get("success", False)
+        return bool(result)

@@ -1,6 +1,6 @@
 # bosszhipin-auto
 
-油猴脚本 + Python 服务，远程控制 Boss直聘页面，支持 JS 远程执行（page / GM 双上下文）。
+Chrome 扩展 + Python 服务，远程控制 Boss直聘页面，支持 JS 远程执行、元素坐标查询、标签激活。
 
 ## 项目结构
 
@@ -8,10 +8,14 @@
 ├── server/
 │   ├── __init__.py      # 导出 TabRegistry, RemoteSession, create_app, run_server
 │   ├── registry.py      # TabRegistry — 标签状态、WS连接、执行 Futures
-│   ├── api.py           # RemoteSession — Python API (open/close/list/execute)
+│   ├── api.py           # RemoteSession — Python API (open/close/list/execute/coordinates/activate)
 │   └── main.py          # FastAPI app factory — 仅 WS 端点，无 REST
+├── extension/
+│   ├── manifest.json    # Chrome Extension MV3 清单
+│   ├── content.js       # 内容脚本 — WS 连接、消息处理、元素坐标计算
+│   └── background.js    # Service Worker — tab/window 激活
 ├── scripts/
-│   └── bosszhipin-remote.user.js  # 油猴脚本
+│   └── bosszhipin-remote.user.js  # (旧) 油猴脚本，推荐使用扩展替代
 ├── main.py              # 启动入口
 ├── AGENTS.md
 ├── pyproject.toml
@@ -27,39 +31,70 @@ uv run python main.py   # 启动服务 + 标签监控
 
 不需要 `uv run` 以外的启动方式。
 
+## 扩展安装
+
+1. 浏览器打开 `chrome://extensions`
+2. 打开 **开发者模式**
+3. 点击 **加载已解压的扩展程序**，选择 `extension/` 目录
+
 ## 架构
 
 | 层 | 说明 |
 |---|---|
-| **油猴脚本** | `@match *.zhipin.com/*` + `*.bosszhipin.com/*`，每个 tab 生成唯一 UUID，WS 连接 Python 服务，注册/注销生命周期。支持 `page`（注入 `<script>`）和 `gm`（油猴作用域）双上下文执行 |
-| **Python 服务** | FastAPI + WebSocket。`/api/ws/tab` 接收油猴连接，`/api/ws/control` 供控制端/监控使用。无 HTTP REST 接口。所有 Python API 通过 `RemoteSession` 直接调用 |
-| **RemoteSession** | 高层 Python API：`open_url`、`close_tab`、`list_tabs`、`execute`。`open_url` 通过 `webbrowser` 启动浏览器 + 轮询等待油猴注册来返回 tab_id |
+| **Chrome 扩展** (推荐) | MV3，`content.js` 运行在 `*.zhipin.com/*` + `*.bosszhipin.com/*`，每个 tab 生成唯一 UUID，WS 连接 Python 服务。`background.js` 处理 `activate_tab` 消息（调用 `chrome.tabs.update` + `chrome.windows.update`） |
+| **油猴脚本** (旧) | `@match *.zhipin.com/*` + `*.bosszhipin.com/*`，功能同扩展但无拓展 API 权限（不支持标签激活） |
+| **Python 服务** | FastAPI + WebSocket。`/api/ws/tab` 接收扩展/油猴连接，`/api/ws/control` 供控制端/监控使用。无 HTTP REST 接口。所有 Python API 通过 `RemoteSession` 直接调用 |
+| **RemoteSession** | 高层 Python API：`open_url`、`close_tab`、`list_tabs`、`execute`、`get_element_coordinates`、`activate_tab`。`open_url` 通过 `webbrowser` 启动浏览器 + 轮询等待注册来返回 tab_id |
 
 ## 消息协议（WebSocket JSON）
 
-油猴 → 服务：`register`, `unregister`, `result`, `ping`
-服务 → 油猴：`execute(id, context, code)`, `close`, `registered`, `pong`
+扩展/油猴 → 服务：`register`, `unregister`, `result`, `ping`
+服务 → 扩展/油猴：`execute(id, context, code)`, `get_coordinates(id, selector)`, `activate(id)`, `close`, `registered`, `pong`
 
-`execute` 通过 `id` 关联请求与结果，支持 30s 超时。
+所有请求（`execute`、`get_coordinates`、`activate`）通过 `id` 关联请求与结果。
 
-## API 使用示例
+`get_coordinates` 返回：
+```json
+{
+  "css": { "x": 100, "y": 200 },
+  "physical": { "x": 125, "y": 250 },
+  "width": 80,
+  "height": 32
+}
+```
+
+## RemoteSession API
 
 ```python
-from server import TabRegistry, RemoteSession, create_app
-import uvicorn, asyncio
+from server import TabRegistry, RemoteSession
 
 registry = TabRegistry()
 session = RemoteSession(registry)
-app = create_app(registry)
 
-server = uvicorn.Server(uvicorn.Config(app, port=8765, log_level="info"))
+# 事件订阅（无需走 WS 监控，直接本地回调）
+def on_tab_connected(msg):
+    print(f"已连接: {msg['tab']['tab_id'][:8]}")
+registry.on("tab_connected", on_tab_connected)
+registry.on("tab_disconnected", lambda m: print(f"已断开: {m['tabId'][:8]}"))
+registry.on("execution_result", lambda m: print(f"执行结果: {m.get('data')}"))
 
-async def worker():
-    tab = await session.open_url("https://www.zhipin.com/")
-    result = await session.execute(tab, "document.title")
-    await session.close_tab(tab)
+# 打开 URL
+tab = await session.open_url("https://www.zhipin.com/")
 
-asyncio.gather(server.serve(), worker())
+# 执行 JS
+result = await session.execute(tab, "document.title")
+
+# 获取元素屏幕坐标（CSS 像素 + DPI 缩放物理像素）
+coords = await session.get_element_coordinates(tab, ".job-name")
+
+# 激活标签页（窗口置前 + 标签聚焦）
+ok = await session.activate_tab(tab)
+
+# 关闭标签
+await session.close_tab(tab)
+
+# 列出所有标签
+tabs = session.list_tabs()
 ```
 
 ## 约定

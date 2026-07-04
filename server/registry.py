@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 from datetime import datetime, timezone
+from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -21,6 +22,56 @@ class TabRegistry:
         self._connections: dict[str, WebSocket] = {}
         self._pending: dict[str, asyncio.Future] = {}
         self._control_clients: list[WebSocket] = []
+        self._event_handlers: dict[str, list[Callable]] = {}
+
+    # ── event subscription ───────────────────────────────────────
+
+    def on(self, event: str, callback: Callable) -> None:
+        """Register a local callback for an event.
+
+        Events:
+        - ``tab_connected``     - received ``dict`` with key ``"tab"``
+        - ``tab_disconnected``  - received ``dict`` with key ``"tabId"``
+        - ``execution_result``  - received ``dict`` with keys
+                                  ``"tabId"``, ``"id"``, ``"data"``, ``"error"``
+        """
+        self._event_handlers.setdefault(event, []).append(callback)
+
+    def off(self, event: str, callback: Callable | None = None) -> None:
+        """Unregister a callback.  If *callback* is ``None``, clears all for the event."""
+        if callback is None:
+            self._event_handlers.pop(event, None)
+        else:
+            try:
+                self._event_handlers[event].remove(callback)
+            except (KeyError, ValueError):
+                pass
+
+    def _broadcast(self, msg: dict) -> None:
+        # Local callbacks
+        for cb in self._event_handlers.get(msg.get("type", ""), []):
+            try:
+                result = cb(msg)
+                if asyncio.iscoroutine(result):
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(result)
+                    except RuntimeError:
+                        logger.warning(
+                            "跳过异步回调（无运行中的事件循环）: %s",
+                            msg.get("type", ""),
+                        )
+            except Exception as e:
+                logger.error("事件回调异常 (%s): %s", msg.get("type", ""), e)
+        # WS control clients
+        for ws in self._control_clients[:]:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(ws.send_text(json.dumps(msg)))
+            except RuntimeError:
+                pass
+            except Exception:
+                self.remove_control_client(ws)
 
     # ── tab lifecycle ────────────────────────────────────────────
 
@@ -88,6 +139,48 @@ class TabRegistry:
             self._pending.pop(cmd_id, None)
             raise TimeoutError(f"执行超时 ({timeout}s)")
 
+    async def send_simple(
+        self,
+        tab_id: str,
+        msg_type: str,
+        timeout: float = 10.0,
+        **extra: Any,
+    ) -> Any:
+        ws = self._connections.get(tab_id)
+        if ws is None:
+            raise ValueError(f"标签 {tab_id[:8]} 未连接")
+
+        cmd_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
+        self._pending[cmd_id] = fut
+
+        payload = {"type": msg_type, "id": cmd_id, **extra}
+        await ws.send_text(json.dumps(payload))
+
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._pending.pop(cmd_id, None)
+            raise TimeoutError(f"{msg_type} 超时 ({timeout}s)")
+
+    async def send_get_coordinates(
+        self,
+        tab_id: str,
+        selector: str,
+        timeout: float = 30.0,
+    ) -> Any:
+        return await self.send_simple(
+            tab_id, "get_coordinates", timeout=timeout, selector=selector
+        )
+
+    async def send_activate(
+        self,
+        tab_id: str,
+        timeout: float = 10.0,
+    ) -> Any:
+        return await self.send_simple(tab_id, "activate", timeout=timeout)
+
     def resolve_result(self, cmd_id: str, data: Any, error: str | None) -> None:
         fut = self._pending.pop(cmd_id, None)
         if fut is not None and not fut.done():
@@ -104,13 +197,6 @@ class TabRegistry:
     def remove_control_client(self, ws: WebSocket) -> None:
         if ws in self._control_clients:
             self._control_clients.remove(ws)
-
-    def _broadcast(self, msg: dict) -> None:
-        for ws in self._control_clients[:]:
-            try:
-                asyncio.create_task(ws.send_text(json.dumps(msg)))
-            except Exception:
-                self.remove_control_client(ws)
 
     # ── cleanup ─────────────────────────────────────────────────
 
