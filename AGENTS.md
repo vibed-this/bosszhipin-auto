@@ -9,7 +9,7 @@ Chrome 扩展 + Python 服务，远程控制 Boss直聘页面，支持 JS 远程
 │   ├── __init__.py      # 导出 TabRegistry, RemoteSession, create_app, run_server
 │   ├── registry.py      # TabRegistry — 标签状态、WS连接、执行 Futures
 │   ├── api.py           # RemoteSession — Python API (open/close/list/execute/coordinates/activate)
-│   └── main.py          # FastAPI app factory — 仅 WS 端点，无 REST
+│   └── main.py          # FastAPI app factory — WS 端点 + `/exec/{cmd_id}` HTTP 端点用于绕过 CSP
 ├── extension/
 │   ├── manifest.json    # Chrome Extension MV3 清单
 │   ├── content.js       # 内容脚本 — WS 连接、消息处理、元素坐标计算
@@ -43,15 +43,20 @@ uv run python main.py   # 启动服务 + 标签监控
 |---|---|
 | **Chrome 扩展** (推荐) | MV3，`content.js` 运行在 `*.zhipin.com/*` + `*.bosszhipin.com/*`，每个 tab 生成唯一 UUID，WS 连接 Python 服务。`background.js` 处理 `activate_tab` 消息（调用 `chrome.tabs.update` + `chrome.windows.update`） |
 | **油猴脚本** (旧) | `@match *.zhipin.com/*` + `*.bosszhipin.com/*`，功能同扩展但无拓展 API 权限（不支持标签激活） |
-| **Python 服务** | FastAPI + WebSocket。`/api/ws/tab` 接收扩展/油猴连接，`/api/ws/control` 供控制端/监控使用。无 HTTP REST 接口。所有 Python API 通过 `RemoteSession` 直接调用 |
+| **Python 服务** | FastAPI + WebSocket。`/api/ws/tab` 接收扩展/油猴连接，`/api/ws/control` 供控制端/监控使用。`/exec/{cmd_id}` HTTP GET 端点返回 JS 脚本用于绕过 CSP。无 HTTP REST 接口。所有 Python API 通过 `RemoteSession` 直接调用 |
 | **RemoteSession** | 高层 Python API：`open_url`、`close_tab`、`list_tabs`、`execute`、`get_element_coordinates`、`activate_tab`。`open_url` 通过 `webbrowser` 启动浏览器 + 轮询等待注册来返回 tab_id |
 
 ## 消息协议（WebSocket JSON）
 
 扩展/油猴 → 服务：`register`, `unregister`, `result`, `ping`
-服务 → 扩展/油猴：`execute(id, context, code)`, `get_coordinates(id, selector)`, `activate(id)`, `close`, `registered`, `pong`
+服务 → 扩展/油猴：`execute(id, context, code)`, `get_coordinates(id, selector)`, `activate(id)`, `close`, `registered`
+
+控制端 → 服务（`/api/ws/control`）：`execute(tabId, code, context?)`, `get_coordinates(tabId, selector)`, `activate(tabId)`
+服务 → 控制端：`result(id, tabId, data, error)`, `error(message)`, `state(tabs)`
 
 所有请求（`execute`、`get_coordinates`、`activate`）通过 `id` 关联请求与结果。
+
+`execute` 的 `context` 参数：`"page"`（通过 `<script>` 加载 `/exec/{id}` 绕过 CSP，默认）或 `"gm"`（content script 直接 eval）。
 
 `get_coordinates` 返回：
 ```json
@@ -81,8 +86,8 @@ registry.on("execution_result", lambda m: print(f"执行结果: {m.get('data')}"
 # 打开 URL
 tab = await session.open_url("https://www.zhipin.com/")
 
-# 执行 JS
-result = await session.execute(tab, "document.title")
+# 执行 JS（context="page" 通过 /exec/{id} 绕过 CSP; context="gm" 直接 eval）
+result = await session.execute(tab, "document.title", timeout=30.0)
 
 # 获取元素屏幕坐标（CSS 像素 + DPI 缩放物理像素）
 coords = await session.get_element_coordinates(tab, ".job-name")
@@ -95,11 +100,15 @@ await session.close_tab(tab)
 
 # 列出所有标签
 tabs = session.list_tabs()
+
+# 查询单个标签
+tab_info = session.get_tab(tab_id)
 ```
 
 ## 约定
 
 - 不使用 Playwright / Selenium 等浏览器自动化库
+- 禁止使用 chrome-devtools-mcp（此项目通过自身 Chrome 扩展 + WS 协议控制浏览器，不使用 DevTools 协议）
 - `open_url` 通过 `webbrowser.open` 启动，不管理浏览器进程
 - 服务器只有 WebSocket 端点，不暴露任何 HTTP REST API
 - Python API 直接在进程内调用 `RemoteSession`，不走网络

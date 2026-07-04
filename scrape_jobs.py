@@ -1,169 +1,361 @@
-"""精炼抓取 BOSS 直聘职位数据 + 定位 tab 元素"""
+"""BOSS直聘自动化抓取
+
+用法::
+
+    import asyncio
+    from scrape_jobs import BossJobsAuto
+
+    async def main():
+        async with BossJobsAuto() as auto:
+            jobs = await auto.run("https://www.zhipin.com/...")
+            print(f"抓取到 {len(jobs)} 条职位")
+
+    asyncio.run(main())
+"""
+
+from __future__ import annotations
 
 import asyncio
-import json
 import logging
+from typing import Any
 
+import pyautogui
 import uvicorn
+
 from server import TabRegistry, RemoteSession, create_app
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-log = logging.getLogger("scraper")
+__all__ = ["BossJobsAuto"]
 
+log = logging.getLogger("boss.jobs_auto")
 
-SCRAPE_JOBS = r"""
-// DOM 结构已知:
-// LI.job-card-box
-//   DIV.job-info
-//     DIV.job-title.clearfix > A.job-name (title) + SPAN.job-salary (salary)
-//     UL.tag-list > LI[0]=experience, LI[1]=education, LI[2..n]=tech tags
-//   DIV.job-card-footer
-//     A.boss-info > SPAN.boss-name (company)
-//     SPAN.company-location (area)
+# ── 关键词过滤 ────────────────────────────────────────────
 
+_WHITELIST = ["前端", "全栈", "Web"]
+_BLACKLIST = ["出差"]
+
+# ── JS 片段 ────────────────────────────────────────────────
+
+_SCRAPE_JOBS = r"""
+function decodeSalary(text) {
+  const map = {
+    '\u{E031}': '0', '\u{E032}': '1', '\u{E033}': '2', '\u{E034}': '3',
+    '\u{E035}': '4', '\u{E036}': '5', '\u{E037}': '6', '\u{E038}': '7',
+    '\u{E039}': '8', '\u{E03A}': '9',
+  };
+  return text.replace(/[\u{E031}-\u{E03A}]/g, ch => map[ch] || ch);
+}
 const cards = document.querySelectorAll('li.job-card-box');
-
 const jobs = Array.from(cards).map(card => {
-  const title  = card.querySelector('.job-name')?.textContent?.replace(/\s+/g, ' ').trim() || '';
-  const salary = card.querySelector('.job-salary')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+  const title = card.querySelector('.job-name')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+  const raw = card.querySelector('.job-salary')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+  const salary = raw ? decodeSalary(raw) : '';
   const company = card.querySelector('.boss-name')?.textContent?.replace(/\s+/g, ' ').trim() || '';
-  const area   = card.querySelector('.company-location')?.textContent?.replace(/\s+/g, ' ').trim() || '';
-
-  // tag-list 的 li 子元素: [经验, 学历, 标签...]
+  const area = card.querySelector('.company-location')?.textContent?.replace(/\s+/g, ' ').trim() || '';
   const tagItems = Array.from(card.querySelectorAll('.tag-list > li'));
   const experience = tagItems[0]?.textContent?.replace(/\s+/g, ' ').trim() || '';
-  const education  = tagItems[1]?.textContent?.replace(/\s+/g, ' ').trim() || '';
-  const techTags   = tagItems.slice(2).map(el => el.textContent?.replace(/\s+/g, ' ').trim()).filter(Boolean);
-
+  const education = tagItems[1]?.textContent?.replace(/\s+/g, ' ').trim() || '';
+  const techTags = tagItems.slice(2).map(el => el.textContent?.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const link = card.querySelector('a.job-name')?.href || '';
-
   return { title, company, area, experience, education, tags: techTags, salary, link };
 });
-
 return {
   url: location.href,
   title: document.title,
   total: jobs.length,
   jobs,
+  noMore: document.body.innerText.includes('没有更多了'),
 };
 """
 
-LOCATE_TAB = r"""
-// "前端/移动开发(长沙)" tab
-const tab = document.querySelector('a.expect-item');
-if (!tab) return { error: 'tab not found' };
+_LOCATE_FRONTEND_TAB = r"""
+const tabs = document.querySelectorAll('a.expect-item');
+for (const tab of tabs) {
+  if (tab.textContent.includes('前端')) {
+    const rect = tab.getBoundingClientRect();
+    const border = (window.outerWidth - window.innerWidth) / 2;
+    const topUI = window.outerHeight - window.innerHeight - border;
+    const cssX = window.screenX + border + rect.left;
+    const cssY = window.screenY + topUI + rect.top;
+    const ratio = window.devicePixelRatio || 1;
+    return {
+      css: { x: Math.round(cssX), y: Math.round(cssY) },
+      physical: { x: Math.round(cssX * ratio), y: Math.round(cssY * ratio) },
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  }
+}
+return null;
+"""
 
-const rect = tab.getBoundingClientRect();
-const text = (tab.textContent || '').replace(/\s+/g, ' ').trim();
+_GET_MATCHING_CARDS = r"""
+const cards = document.querySelectorAll('li.job-card-box');
+const whitelist = ['前端', '全栈', 'Web'];
+const blacklist = ['出差'];
+const result = [];
+for (let i = 0; i < cards.length; i++) {
+  const card = cards[i];
+  const title = card.querySelector('.job-name')?.textContent?.trim() || '';
+  const link = card.querySelector('a.job-name')?.href || '';
+  const matchWhite = whitelist.some(kw => title.includes(kw));
+  const matchBlack = blacklist.some(kw => title.includes(kw));
+  if (!matchWhite || matchBlack) continue;
+  result.push({ title, link, index: i });
+}
+return result;
+"""
 
-// 获取样式
-const style = window.getComputedStyle(tab);
-const display = style.display;
-const visibility = style.visibility;
+_SELECT_CARD_BY_INDEX = r"""
+const card = document.querySelectorAll('li.job-card-box')[INDEX];
+if (!card) return 'no card';
+card.click();
+return 'ok';
+"""
 
-// 判断是否在可视区域
-const inViewport = rect.top >= 0 && rect.left >= 0 &&
-  rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
-  rect.right <= (window.innerWidth || document.documentElement.clientWidth);
-
+_CHECK_CHAT_BTN = r"""
+const btn = document.querySelector('a.op-btn-chat');
+if (!btn) return { exists: false };
+const rect = btn.getBoundingClientRect();
+const border = (window.outerWidth - window.innerWidth) / 2;
+const topUI = window.outerHeight - window.innerHeight - border;
+const ratio = window.devicePixelRatio || 1;
 return {
-  text,
-  className: tab.className,
-  viewport: { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) },
-  inViewport,
-  display,
-  visibility,
-  computed: {
-    position: style.position,
-    overflow: style.overflow,
-    zIndex: style.zIndex,
-  },
-  // 外层容器
-  container: tab.parentElement?.className || '',
-  // 相对 document 的偏移 (滚动修正)
-  docOffset: {
-    x: Math.round(rect.left + window.scrollX),
-    y: Math.round(rect.top + window.scrollY),
+  exists: true,
+  disabled: btn.classList.contains('is-disabled'),
+  text: btn.textContent.trim(),
+  physical: {
+    x: Math.round((window.screenX + border + rect.left + rect.width / 2) * ratio),
+    y: Math.round((window.screenY + topUI + rect.top + rect.height / 2) * ratio),
   },
 };
 """
 
-
-async def main():
-    host, port = "127.0.0.1", 8765
-    registry = TabRegistry()
-    session = RemoteSession(registry)
-    app = create_app(registry)
-
-    connected = asyncio.Event()
-    registry.on("tab_connected", lambda m: (log.info("连接: %s", m["tab"]["tab_id"][:8]), connected.set()))
-
-    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
-    server_task = asyncio.create_task(server.serve())
-
-    try:
-        await asyncio.wait_for(connected.wait(), timeout=120.0)
-        tab = registry.tabs[0]
-        tab_id = tab["tab_id"]
-        log.info("使用标签: %s", tab_id[:8])
-
-        # 1. 精炼抓取
-        log.info("抓取职位数据...")
-        data = await session.execute(tab_id, SCRAPE_JOBS)
-        jobs = data.get("jobs", [])
-        print(f"\n{'=' * 60}")
-        print(f"职位数据 ({data.get('total', len(jobs))} 条)")
-        print(f"{'=' * 60}")
-        for j in jobs:
-            tags_str = ' '.join(j['tags'])
-            print(f"\n  {j['title']}")
-            print(f"    公司: {j['company']}  |  地点: {j['area']}")
-            print(f"    经验: {j['experience']}  |  学历: {j['education']}")
-            if tags_str:
-                print(f"    技能: {tags_str}")
-            print(f"    链接: {j['link']}")
-
-        # 2. 定位 tab
-        log.info("定位 tab...")
-        tab_info = await session.execute(tab_id, LOCATE_TAB)
-        print(f"\n{'=' * 60}")
-        print("Tab 定位：前端/移动开发(长沙)")
-        print(f"{'=' * 60}")
-        print(f"  文本: {tab_info.get('text')}")
-        print(f"  class: {tab_info.get('className')}")
-        vp = tab_info.get('viewport', {})
-        print(f"  视口位置: left={vp.get('x')}, top={vp.get('y')}, "
-              f"width={vp.get('width')}, height={vp.get('height')}")
-        print(f"  在视口中: {tab_info.get('inViewport')}")
-        doc = tab_info.get('docOffset', {})
-        print(f"  文档位置: x={doc.get('x')}, y={doc.get('y')}")
-        print(f"  容器: {tab_info.get('container')}")
-
-        # 3. 坐标查询
-        log.info("查询屏幕坐标...")
-        try:
-            coords = await session.get_element_coordinates(tab_id, 'a.expect-item')
-            print(f"\n  屏幕坐标 (CSS): ({coords['css']['x']}, {coords['css']['y']})")
-            print(f"  屏幕坐标 (物理): ({coords['physical']['x']}, {coords['physical']['y']})")
-            print(f"  尺寸: {coords['width']}x{coords['height']}")
-        except Exception as e:
-            print(f"\n  坐标查询失败: {e}")
-
-        print(f"\n{'=' * 60}")
-        print("完整 JSON")
-        print(f"{'=' * 60}")
-        print(json.dumps({"jobs": jobs, "tab": tab_info}, ensure_ascii=False, indent=2))
-
-    except asyncio.TimeoutError:
-        log.error("超时")
-    except Exception as e:
-        log.error("出错: %s", e)
-        import traceback; traceback.print_exc()
-    finally:
-        server_task.cancel()
-        try: await server_task
-        except: pass
+_CLICK_CHAT_BTN = r"""
+const btn = document.querySelector('a.op-btn-chat');
+if (!btn) return 'no btn';
+if (btn.classList.contains('is-disabled')) return 'disabled';
+btn.click();
+return 'clicked';
+"""
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+class BossJobsAuto:
+    """BOSS直聘自动化：启动服务 → 打开页面 → 点击前端 tab → 循环爬取+滚动+沟通"""
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
+        self.host = host
+        self.port = port
+        self.registry = TabRegistry()
+        self.session = RemoteSession(self.registry)
+        self.app = create_app(self.registry)
+        self._server: uvicorn.Server | None = None
+        self._server_task: asyncio.Task[None] | None = None
+        self._tab_id: str | None = None
+
+    async def __aenter__(self) -> BossJobsAuto:
+        await self._start_server()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self._stop_server()
+
+    # ── 服务器生命周期 ─────────────────────────────────────
+
+    async def _start_server(self) -> None:
+        config = uvicorn.Config(self.app, host=self.host, port=self.port, log_level="warning")
+        self._server = uvicorn.Server(config)
+        self._server_task = asyncio.create_task(self._server.serve())
+
+    async def _stop_server(self) -> None:
+        if self._server:
+            self._server.should_exit = True
+            self._server = None
+        if self._server_task:
+            self._server_task.cancel()
+            try:
+                await self._server_task
+            except asyncio.CancelledError:
+                pass
+            self._server_task = None
+
+    # ── 主流程 ─────────────────────────────────────────────
+
+    async def run(
+        self,
+        url: str | None = None,
+        max_scrolls: int = 10,
+    ) -> list[dict[str, Any]]:
+        """打开页面 → 点击前端 tab → 循环爬取+滚动，返回职位列表"""
+        self._tab_id = await self._connect(url)
+        log.info("标签就绪: %s", self._tab_id[:8])
+
+        await self.session.activate_tab(self._tab_id)
+        await asyncio.sleep(0.5)
+
+        # 清除旧标签，取最新注册的标签
+        self._refresh_tab_id()
+
+        await self.click_frontend_tab()
+
+        all_jobs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        applied: set[str] = set()
+
+        for scroll_i in range(max_scrolls + 1):
+            if scroll_i > 0:
+                log.info("滚动 (%d/%d)...", scroll_i, max_scrolls)
+                await self.scroll_down()
+                await asyncio.sleep(1.0)
+
+            self._refresh_tab_id()
+            data = await self.session.execute(self._tab_id, _SCRAPE_JOBS)
+            jobs = data.get("jobs", [])
+
+            new_jobs = [j for j in jobs if j["link"] not in seen]
+            for j in new_jobs:
+                seen.add(j["link"])
+            all_jobs.extend(new_jobs)
+
+            log.info(
+                "第 %d 轮: %d 条, 新增 %d 条, 总计 %d 条",
+                scroll_i + 1, len(jobs), len(new_jobs), len(all_jobs),
+            )
+
+            # 对新增的匹配岗位发起沟通
+            await self._apply_matches(new_jobs, applied)
+
+            if data.get("noMore", True):
+                log.info("无更多数据，结束")
+                break
+
+        return all_jobs
+
+    # ── 标签连接 ────────────────────────────────────────────
+
+    async def _connect(self, url: str | None, timeout: float = 120.0) -> str:
+        if url:
+            tab_id = await self.session.open_url(url)
+            if not tab_id:
+                raise TimeoutError(f"标签连接超时: {url}")
+            return tab_id
+
+        event = asyncio.Event()
+        self.registry.on("tab_connected", lambda m: event.set())
+        await asyncio.wait_for(event.wait(), timeout=timeout)
+        return self.registry.tabs[0]["tab_id"]
+
+    def _refresh_tab_id(self) -> None:
+        if self._tab_id and self.registry.is_connected(self._tab_id):
+            return
+        connected = [
+            t['tab_id'] for t in self.registry.tabs
+            if self.registry.is_connected(t['tab_id'])
+        ]
+        if connected:
+            self._tab_id = connected[-1]
+            log.info("切换到标签: %s", self._tab_id[:8])
+
+    # ── 点击前端 tab ────────────────────────────────────────
+
+    async def click_frontend_tab(self) -> bool:
+        coords = await self.session.execute(self._tab_id, _LOCATE_FRONTEND_TAB)
+        if not coords:
+            log.warning("未找到「前端」tab")
+            return False
+        cx = coords["physical"]["x"] + coords["width"] // 2
+        cy = coords["physical"]["y"] + coords["height"] // 2
+        pyautogui.click(cx, cy)
+        log.info("已点击「前端」tab @ (%d, %d)", cx, cy)
+        await asyncio.sleep(2.0)
+        return True
+
+    # ── 滚动 ────────────────────────────────────────────────
+
+    async def _get_job_list_center(self) -> tuple[int, int]:
+        js = r"""
+const card = document.querySelector('li.job-card-box');
+if (!card) return null;
+const rect = card.getBoundingClientRect();
+const border = (window.outerWidth - window.innerWidth) / 2;
+const topUI = window.outerHeight - window.innerHeight - border;
+const centerX = rect.left + rect.width / 2;
+const centerY = rect.top + rect.height / 2;
+const cssX = window.screenX + border + centerX;
+const cssY = window.screenY + topUI + centerY;
+const ratio = window.devicePixelRatio || 1;
+return { x: Math.round(cssX * ratio), y: Math.round(cssY * ratio) };
+"""
+        result = await self.session.execute(self._tab_id, js)
+        if not result:
+            raise RuntimeError("无法定位职位列表区域")
+        return (result["x"], result["y"])
+
+    async def scroll_down(self, presses: int = 3) -> None:
+        px, py = await self._get_job_list_center()
+        pyautogui.moveTo(px, py)
+        pyautogui.press('pagedown', presses=presses)
+
+    # ── 匹配与沟通 ──────────────────────────────────────────
+
+    async def _apply_matches(
+        self,
+        new_jobs: list[dict[str, Any]],
+        applied: set[str],
+    ) -> None:
+        """遍历新增岗位，对白名单匹配且未沟通的发起沟通"""
+        matches = [j for j in new_jobs if self._matches(j["title"])]
+        if not matches:
+            return
+
+        log.info("本轮 %d 个匹配岗位，准备发起沟通", len(matches))
+
+        # 获取当前可见匹配卡片的索引
+        card_map = await self.session.execute(self._tab_id, _GET_MATCHING_CARDS)
+        if not isinstance(card_map, list):
+            log.warning("无法获取卡片列表: %s", card_map)
+            return
+
+        for job in matches:
+            if job["link"] in applied:
+                continue
+            # 找到对应卡片在 DOM 中的索引
+            entry = next(
+                (c for c in card_map if c.get("link") == job["link"]),
+                None,
+            )
+            if entry is None:
+                log.info("卡片 %s 已不在可见区域，跳过", job["title"][:30])
+                continue
+
+            # 点击卡片选中（始终用搜索页 tab，不切换）
+            sel_js = _SELECT_CARD_BY_INDEX.replace("INDEX", str(entry["index"]))
+            result = await self.session.execute(self._tab_id, sel_js)
+            if result != "ok":
+                log.warning("选中卡片失败: %s", job["title"][:30])
+                continue
+            await asyncio.sleep(1.0)
+
+            # 检查沟通按钮
+            btn = await self.session.execute(self._tab_id, _CHECK_CHAT_BTN)
+            if not btn or not btn.get("exists"):
+                log.info("无沟通按钮: %s", job["title"][:30])
+                continue
+            if btn.get("disabled"):
+                log.info("已沟通过，跳过: %s", job["title"][:30])
+                applied.add(job["link"])
+                continue
+
+            # 点击沟通
+            click_result = await self.session.execute(self._tab_id, _CLICK_CHAT_BTN)
+            if click_result == "clicked":
+                log.info("✅ 已向「%s」发送沟通", job["title"][:40])
+                applied.add(job["link"])
+                await asyncio.sleep(2.0)
+            else:
+                log.warning("沟通失败: %s", click_result)
+
+    @staticmethod
+    def _matches(title: str) -> bool:
+        match_white = any(kw in title for kw in _WHITELIST)
+        match_black = any(kw in title for kw in _BLACKLIST)
+        return match_white and not match_black
