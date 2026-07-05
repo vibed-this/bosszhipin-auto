@@ -12,11 +12,24 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("flow.delete_chat")
 
+_DELETE_KEYWORDS = ["抱歉", "不好意思", "对不起", "不合适", "不太合适"]
+
+
+def _should_delete(status: str, last_msg: str) -> bool:
+    if status == "已读" and last_msg.startswith("您好"):
+        return True
+    for kw in _DELETE_KEYWORDS:
+        if kw in last_msg:
+            return True
+    return False
+
 
 class BossDeleteChatFlow:
     """遍历消息列表，删除符合条件的聊天记录。
 
-    筛选条件：status == 已读 且 lastMsg 以"您好"开头。
+    条件（任一满足）：
+    - status == 已读 且 lastMsg 以"您好"开头
+    - lastMsg 包含关键词：抱歉、不好意思、对不起、不合适、不太合适
     """
 
     def __init__(self, page: BossChatListPage, session: "TabSession") -> None:
@@ -47,63 +60,44 @@ class BossDeleteChatFlow:
             log.warning("聊天列表未加载")
             return []
 
-        items = await self._page.get_chat_items_with_status()
-        log.info("共 %d 条聊天记录", len(items))
+        processed: set[tuple[str, str]] = set()
+        deleted: list[dict[str, Any]] = []
 
-        matched: list[dict[str, Any]] = []
-        for i, item in enumerate(items):
+        async for item, idx in self._page.iter_chat_items():
             status = item.get("status", "")
             last_msg = item.get("lastMsg", "")
-            if status == "已读" and last_msg.startswith("您好"):
-                log.info(
-                    "匹配 #%d: name=%s company=%s lastMsg=%s",
-                    i, item.get("name"), item.get("company"), last_msg[:20],
-                )
-                matched.append({**item, "_index": i})
+            key = (item.get("name", ""), item.get("company", ""))
 
-        if not matched:
-            log.info("没有匹配的聊天记录")
-            return []
+            if key not in processed and _should_delete(status, last_msg):
+                processed.add(key)
+                log.info("--- 处理 #%d: %s ---", idx, item.get("name"))
 
-        log.info("匹配 %d 条，开始删除流程", len(matched))
-
-        deleted: list[dict[str, Any]] = []
-        for m in matched:
-            idx = m["_index"]
-            name = m.get("name", "")
-            log.info("--- 处理: %s ---", name)
-
-            ok = await self._page.click_chat_item(idx)
-            if not ok:
-                log.warning("点击聊天项失败，跳过")
-                continue
-            await asyncio.sleep(random.uniform(0.5, 1.0))
-
-            ok = await self._page.click_more_button()
-            if not ok:
-                log.warning("点击更多按钮失败，跳过")
-                continue
-            await asyncio.sleep(random.uniform(0.3, 0.6))
-
-            ok = await self._page.click_delete_in_menu()
-            if not ok:
-                log.warning("点击删除失败，跳过")
-                continue
-            await asyncio.sleep(random.uniform(0.5, 1.0))
-
-            if dry_run:
-                log.info("[DRY RUN] 点击取消 (不实际删除)")
-                ok = await self._page.click_cancel_in_dialog()
+                ok = await self._page.click_chat_item(idx)
                 if not ok:
-                    log.warning("点击取消失败")
-            else:
-                log.info("点击确定 (实际删除)")
-                ok = await self._page.click_confirm_in_dialog()
-                if not ok:
-                    log.warning("点击确定失败")
+                    continue
+                await asyncio.sleep(random.uniform(0.5, 1.0))
 
-            await asyncio.sleep(random.uniform(0.5, 1.0))
-            deleted.append(m)
+                ok = await self._page.click_more_button()
+                if not ok:
+                    continue
+                await asyncio.sleep(random.uniform(0.3, 0.6))
+
+                ok = await self._page.click_delete_in_menu()
+                if not ok:
+                    continue
+                await asyncio.sleep(random.uniform(0.5, 1.0))
+
+                if dry_run:
+                    log.info("[DRY RUN] 点击取消")
+                    ok = await self._page.click_cancel_in_dialog()
+                else:
+                    log.info("点击确定")
+                    ok = await self._page.click_confirm_in_dialog()
+                if not ok:
+                    log.warning("对话框操作失败")
+
+                await asyncio.sleep(random.uniform(0.5, 1.0))
+                deleted.append(item)
 
         log.info("完成: 共处理 %d 条", len(deleted))
         return deleted

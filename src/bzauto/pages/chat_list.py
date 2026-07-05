@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
-from typing import Any
+from typing import Any, AsyncIterator
 
 from bzauto.server.session import TabSession
 
@@ -75,6 +76,44 @@ class BossChatListPage:
         for item in raw:
             item["status"] = (item.get("status") or "").strip(" []")
         return raw
+
+    async def get_chat_item_at(self, index: int) -> dict[str, Any] | None:
+        raw = await self._session.query(
+            select=_LIST_ITEM,
+            filter={"index": index},
+            project={
+                "name": f"{_NAME}@text",
+                "company": f"{_NAME_BOX} span:nth-child(2)@text",
+                "position": f"{_NAME_BOX} span:nth-child(4)@text",
+                "time": f"{_TIME}@text",
+                "lastMsg": f"{_MSG}@text",
+                "status": f"{_STATUS}@text",
+            },
+            return_="list",
+        )
+        if not raw:
+            return None
+        item = raw[0]
+        item["status"] = (item.get("status") or "").strip(" []")
+        return item
+
+    async def iter_chat_items(self, *, max_scrolls: int = 0) -> AsyncIterator[tuple[dict[str, Any], int]]:
+        index = 0
+        scroll_count = 0
+
+        while True:
+            item = await self.get_chat_item_at(index)
+
+            if item is None:
+                if scroll_count < max_scrolls and await self.has_more():
+                    scroll_count += 1
+                    await self._session.scroll_pagedown(presses=3)
+                    await asyncio.sleep(random.uniform(0.8, 1.5))
+                    continue
+                break
+
+            yield item, index
+            index += 1
 
     async def get_chat_item_count(self) -> int:
         result = await self._session.query(

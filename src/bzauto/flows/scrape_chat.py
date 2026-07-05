@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -50,36 +49,13 @@ class BossScrapeChatFlow:
             return []
 
         all_items: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
 
-        # 第一屏
-        items = await self._page.get_chat_items_with_status()
-        log.info("第 1 屏: %d 条", len(items))
-        all_items.extend(items)
-
-        # 滚动加载更多
-        for scroll in range(max_scrolls):
-            if not await self._page.has_more():
-                log.info("没有更多数据")
-                break
-
-            log.info("翻页 #%d...", scroll + 1)
-            await session.scroll_pagedown(presses=3)
-            await asyncio.sleep(random.uniform(0.8, 1.5))
-
-            items = await self._page.get_chat_items_with_status()
-            # 去重：以 name+company 为 key
-            seen = {(it["name"], it["company"]) for it in all_items}
-            new_items = [
-                it for it in items
-                if (it["name"], it["company"]) not in seen
-            ]
-
-            if not new_items:
-                log.info("无新增数据，停止滚动")
-                break
-
-            log.info("第 %d 屏新增: %d 条", scroll + 2, len(new_items))
-            all_items.extend(new_items)
+        async for item, _idx in self._page.iter_chat_items(max_scrolls=max_scrolls):
+            key = (item.get("name", ""), item.get("company", ""))
+            if key not in seen:
+                seen.add(key)
+                all_items.append(item)
 
         log.info("爬取完成: 共 %d 条聊天记录", len(all_items))
 
