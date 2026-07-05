@@ -91,7 +91,7 @@ class TabRegistry:
             return await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.TimeoutError:
             self._pending.pop(cmd_id, None)
-            raise TimeoutError(f"{msg_type} 超时 ({timeout}s)")
+            raise TimeoutError(f"{msg_type} 超时 ({timeout}s)") from None
 
     def resolve_result(self, cmd_id: str, data: Any, error: str | None) -> None:
         fut = self._pending.pop(cmd_id, None)

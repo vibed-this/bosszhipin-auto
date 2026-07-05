@@ -21,9 +21,13 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         logger.info("bosszhipin 远程控制服务启动中...")
-        yield
-        logger.info("服务关闭中...")
-        await registry.close_all()
+        try:
+            yield
+        except asyncio.CancelledError:
+            pass
+        finally:
+            logger.info("服务关闭中...")
+            await registry.close_all()
 
     app = FastAPI(title="Boss直聘远程控制", lifespan=lifespan)
 
@@ -72,6 +76,8 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
                 elif t == "ping":
                     pass
 
+        except asyncio.CancelledError:
+            pass
         except WebSocketDisconnect:
             logger.info("[-] 扩展后台断开")
         except Exception as e:
