@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QFrame,
+    QHBoxLayout,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+
+class ControlPanel(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("控制台")
+        self.setWindowFlags(
+            Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setFont(QFont("Microsoft YaHei", 9))
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(0)
+
+        # Row: checkboxes
+        cb_row = QHBoxLayout()
+        cb_row.setSpacing(6)
+        self.chk_scrape = QCheckBox("抓取")
+        self.chk_scrape.setFixedSize(55, 20)
+        self.chk_scrape.setChecked(True)
+        self.chk_delete = QCheckBox("删拒")
+        self.chk_delete.setFixedSize(55, 20)
+        self.chk_urge = QCheckBox("催促")
+        self.chk_urge.setFixedSize(55, 20)
+        cb_row.addWidget(self.chk_scrape)
+        cb_row.addWidget(self.chk_delete)
+        cb_row.addWidget(self.chk_urge)
+        cb_row.addStretch()
+        layout.addLayout(cb_row)
+
+        # Button: 聊天
+        layout.addSpacing(2)
+        self.btn_chat = QPushButton("聊天")
+        self.btn_chat.setFixedHeight(28)
+        layout.addWidget(self.btn_chat)
+
+        # Separator
+        layout.addSpacing(4)
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep)
+
+        # Button: 开始职位爬取
+        layout.addSpacing(2)
+        self.btn_dump = QPushButton("开始职位爬取")
+        self.btn_dump.setFixedHeight(28)
+        layout.addWidget(self.btn_dump)
+
+        # Button: 批量沟通
+        layout.addSpacing(2)
+        self.btn_batch = QPushButton("批量沟通")
+        self.btn_batch.setFixedHeight(28)
+        layout.addWidget(self.btn_batch)
+
+        # Separator
+        layout.addSpacing(4)
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep2)
+
+        # Button: 催促
+        layout.addSpacing(2)
+        self.btn_urge = QPushButton("催促")
+        self.btn_urge.setFixedHeight(28)
+        layout.addWidget(self.btn_urge)
+
+        # Button: 退出
+        layout.addSpacing(6)
+        self.btn_exit = QPushButton("退出")
+        self.btn_exit.setFixedHeight(20)
+        self.btn_exit.clicked.connect(QApplication.quit)
+        layout.addWidget(self.btn_exit)
+
+        self.adjustSize()
+        self.setFixedSize(self.width(), self.height())

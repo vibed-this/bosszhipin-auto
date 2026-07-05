@@ -13,12 +13,14 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
     "pyautogui>=0.9.54",
     "keyboard>=0.13.5",
+    "pyside6>=6.6.0",
 ]
 
 [project.scripts]
 boss-server = "bzauto.__main__:cli_main"
 boss-analyze = "bzauto.analyze:cli_main"
 boss-scrape = "bzauto.scrape_jobs:cli_main"
+boss-ui = "bzauto.ui:run_ui"
 
 [tool.setuptools.packages.find]
 where = ["src"]

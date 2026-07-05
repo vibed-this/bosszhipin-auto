@@ -1,0 +1,55 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "boss-server",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "bzauto",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "PYTHONUNBUFFERED": "1"
+            }
+        },
+        {
+            "name": "boss-analyze",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "bzauto.analyze",
+            "console": "integratedTerminal",
+            "args": [
+                "https://www.zhipin.com/web/geek/jobs"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "boss-scrape",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "bzauto.scrape_jobs",
+            "console": "integratedTerminal",
+            "args": [
+                "https://www.zhipin.com/web/geek/jobs"
+            ],
+            "justMyCode": true
+        },
+        {
+            "name": "boss-ui",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "bzauto.ui",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
+            "name": "Python: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
