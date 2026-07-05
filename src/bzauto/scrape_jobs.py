@@ -3,7 +3,7 @@
 用法::
 
     import asyncio
-    from scrape_jobs import BossJobsAuto
+    from bzauto.scrape_jobs import BossJobsAuto
 
     async def main():
         async with BossJobsAuto() as auto:
@@ -23,9 +23,9 @@ from typing import Any
 
 import keyboard
 
-from server.session import TabSession
-from pages.job_list import BossJobListPage
-from flows.scrape import BossScrapeFlow
+from bzauto.server.session import TabSession
+from bzauto.pages.job_list import BossJobListPage
+from bzauto.flows.scrape import BossScrapeFlow
 
 log = logging.getLogger("boss.main")
 
@@ -54,16 +54,20 @@ class BossJobsAuto:
         await self.session.stop()
 
 
-if __name__ == "__main__":
+def cli_main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     log.info("按 Ctrl+E 强制退出")
 
     keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
 
-    async def main():
+    async def _main():
         url = sys.argv[1] if len(sys.argv) > 1 else "https://www.zhipin.com/web/geek/jobs"
         async with BossJobsAuto() as auto:
             jobs = await auto.run(url, reuse_existing=True)
             print(f"抓取到 {len(jobs)} 条职位")
 
-    asyncio.run(main())
+    asyncio.run(_main())
+
+
+if __name__ == "__main__":
+    cli_main()

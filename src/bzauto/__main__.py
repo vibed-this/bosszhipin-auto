@@ -1,12 +1,10 @@
-"""Example: 启动 WebSocket 服务并通过本地 API 监听标签事件。"""
-
 import asyncio
 import json
 import logging
 
 import uvicorn
 
-from server import TabRegistry, RemoteSession, create_app
+from bzauto.server import TabRegistry, RemoteSession, create_app
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,7 +53,6 @@ async def main() -> None:
     session = RemoteSession(registry)
     app = create_app(registry)
 
-    # ── 通过本地 API 订阅事件，无需额外 WS 连接 ──────────────
     registry.on("tab_ready", print_tab_ready)
     registry.on("tab_changed", print_tab_changed)
     registry.on("tab_gone", print_tab_gone)
@@ -69,6 +66,10 @@ async def main() -> None:
     print("等待扩展连接...\n")
 
     await server.serve()
+
+
+def cli_main() -> None:
+    asyncio.run(main())
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 用法::
 
-    from analyze import PageAnalyzer
+    from bzauto.analyze import PageAnalyzer
 
     async def main():
         async with PageAnalyzer() as pa:
@@ -19,7 +19,7 @@ import asyncio
 import logging
 import sys
 
-from server.session import TabSession
+from bzauto.server.session import TabSession
 
 log = logging.getLogger("analyze")
 
@@ -153,6 +153,10 @@ async def main():
         url = sys.argv[1] if len(sys.argv) > 1 else None
         await pa.scan(url)
         log.info("\n=== 输入任意关键词搜索 ===")
+
+
+def cli_main() -> None:
+    asyncio.run(main())
 
 
 if __name__ == "__main__":

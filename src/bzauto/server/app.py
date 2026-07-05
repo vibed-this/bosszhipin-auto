@@ -9,17 +9,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 import uvicorn
 
-from server.registry import TabRegistry
+from bzauto.server.registry import TabRegistry
 
 logger = logging.getLogger("boss.server")
 
 
 def create_app(registry: TabRegistry | None = None) -> FastAPI:
-    """Build the FastAPI app with a single WebSocket endpoint ``/api/ws``.
-
-    The extension background.js connects here and handles all tab operations
-    via ``chrome.tabs.*`` and ``chrome.scripting.executeScript``.
-    """
     if registry is None:
         registry = TabRegistry()
 
@@ -86,8 +81,6 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
 
     return app
 
-
-# ── Runner ──────────────────────────────────────────────────
 
 def run_server(
     host: str = "127.0.0.1",

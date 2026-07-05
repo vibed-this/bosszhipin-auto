@@ -8,7 +8,7 @@ from typing import Any
 import pyautogui
 import uvicorn
 
-from server import TabRegistry, RemoteSession, create_app
+from bzauto.server import TabRegistry, RemoteSession, create_app
 
 log = logging.getLogger("boss.session")
 
@@ -29,8 +29,6 @@ class TabSession:
         self._server: uvicorn.Server | None = None
         self._server_task: asyncio.Task | None = None
         self._tab_id: int | None = None
-
-    # ── 生命周期 ──────────────────────────────────────
 
     async def start(self) -> None:
         config = uvicorn.Config(self._app, host=self._host, port=self._port, log_level="warning")
@@ -55,8 +53,6 @@ class TabSession:
 
     async def __aexit__(self, *args: Any) -> None:
         await self.stop()
-
-    # ── 标签管理 ──────────────────────────────────────
 
     async def ensure_tab(
         self,
@@ -124,7 +120,6 @@ class TabSession:
             self._tab_id = None
 
     def refresh_tab(self) -> int | None:
-        """如果当前标签已不在 registry，尝试取最新标签。返回新 tab_id 或 None。"""
         if self._tab_id is not None and self._registry.get_tab(self._tab_id):
             return self._tab_id
         tabs = self._registry.tabs
@@ -134,8 +129,6 @@ class TabSession:
             return self._tab_id
         self._tab_id = None
         return None
-
-    # ── 设备输入 (pyautogui) ─────────────────────────────────────
 
     async def click(self, x: int, y: int) -> None:
         await self.activate()
@@ -151,8 +144,6 @@ class TabSession:
         if at_x is not None and at_y is not None:
             pyautogui.moveTo(at_x, at_y)
         pyautogui.press("pagedown", presses=presses)
-
-    # ── 远程操作代理（自动注入当前 chromeTabId） ───────────────
 
     def _require_tab(self) -> int:
         if self._tab_id is None:
@@ -191,15 +182,11 @@ class TabSession:
     ) -> dict | None:
         return await self._rsession.bbox(self._require_tab(), select, filter=filter, timeout=timeout)
 
-    # ── 事件订阅 ──────────────────────────────────────
-
     def on(self, event: str, callback: Any) -> None:
         self._registry.on(event, callback)
 
     def off(self, event: str, callback: Any | None = None) -> None:
         self._registry.off(event, callback)
-
-    # ── 逃生口 ────────────────────────────────────────
 
     @property
     def remote_session(self) -> RemoteSession:

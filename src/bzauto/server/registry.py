@@ -35,17 +35,7 @@ class TabRegistry:
         self._event_handlers: dict[str, list[Callable]] = {}
         self._exec_store: dict[str, str] = {}
 
-    # ── event subscription ───────────────────────────────────────
-
     def on(self, event: str, callback: Callable) -> None:
-        """Subscribe to a semantic event.
-
-        Supported events:
-          tab_ready   — tab entered registry. Payload: tab fields + source ("sync"|"created"|"updated")
-          tab_changed — tab fields changed. Payload: tab fields + changes dict
-          tab_gone    — tab left registry. Payload: tab fields + source ("closed"|"sync_removed")
-          execution_result — JS execution result. Payload: id, data, error
-        """
         self._event_handlers.setdefault(event, []).append(callback)
 
     def off(self, event: str, callback: Callable | None = None) -> None:
@@ -69,8 +59,6 @@ class TabRegistry:
                         logger.warning("跳过异步回调: %s", msg.get("type", ""))
             except Exception as e:
                 logger.error("事件回调异常 (%s): %s", msg.get("type", ""), e)
-
-    # ── WebSocket connection ──────────────────────────────────────
 
     def set_ws(self, ws: WebSocket) -> None:
         self._ws = ws
@@ -112,8 +100,6 @@ class TabRegistry:
                 fut.set_exception(Exception(error))
             else:
                 fut.set_result(data)
-
-    # ── tab state (driven by bg events) ──────────────────────────
 
     def handle_tab_event(self, msg: dict) -> None:
         t = msg.get("type")
@@ -179,7 +165,6 @@ class TabRegistry:
                     if changes:
                         self._broadcast({"type": "tab_changed", "chromeTabId": ctid, "changes": changes, **tb})
                 else:
-                    # race: onUpdated before sync_state
                     tb = {
                         "chromeTabId": ctid,
                         "url": msg.get("url", ""),
@@ -208,16 +193,12 @@ class TabRegistry:
                         self._tabs[tid]["active"] = new_active
                         self._broadcast({"type": "tab_changed", "chromeTabId": tid, "changes": {"active": new_active}, **self._tabs[tid]})
 
-    # ── tab access ────────────────────────────────────────────────
-
     @property
     def tabs(self) -> list[dict[str, Any]]:
         return list(self._tabs.values())
 
     def get_tab(self, chrome_tab_id: int) -> dict[str, Any] | None:
         return self._tabs.get(chrome_tab_id)
-
-    # ── cleanup ──────────────────────────────────────────────────
 
     async def close_all(self) -> None:
         self._exec_store.clear()

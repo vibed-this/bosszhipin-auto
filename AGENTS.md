@@ -1,36 +1,40 @@
 任何时候执行修改前都必须向用户请求。
 如果用户的输入里没有明确表示执行修改，那么禁止擅自修改文件。
 如果用户打断进行提问，那么只需要回答用户的问题，回答完后禁止擅自开始执行改动，必须询问用户。
-# bosszhipin-auto
+# bzauto
 
 Chrome 扩展 + Python 服务，远程控制 Boss直聘页面，支持 JS 远程执行、元素坐标查询、标签管理。
 
 ## 项目结构
 
 ```
-├── server/
-│   ├── __init__.py      # 导出 TabRegistry, RemoteSession, TabSession, create_app, run_server
-│   ├── registry.py      # TabRegistry — 标签状态、WS连接、执行 Futures、chromeTabId 映射
-│   ├── api.py           # RemoteSession — Python API (open/close/list/execute/coordinates/activate/reload)
-│   ├── session.py       # TabSession — 基础设施层：服务器生命周期 + 标签管理 + 设备输入 + RemoteSession 代理
-│   └── main.py          # FastAPI app factory — WS 端点 `/api/ws` + `/exec/{execId}` HTTP 端点用于 MAIN world 执行
-├── pages/
-│   ├── __init__.py
-│   └── job_list.py      # BossJobListPage — BOSS直聘职位列表页面对象（选择器 + 操作方法）
-├── flows/
-│   ├── __init__.py
-│   └── scrape.py        # BossScrapeFlow — 爬取 + 沟通流程编排
+├── src/
+│   └── bzauto/
+│       ├── __init__.py          # 顶层导出：TabRegistry, RemoteSession, TabSession, create_app, run_server
+│       ├── __main__.py          # python -m bzauto 启动服务
+│       ├── analyze.py           # PageAnalyzer — 使用 TabSession 的页面分析工具
+│       ├── scrape_jobs.py       # BossJobsAuto — 组合 TabSession + BossJobListPage + BossScrapeFlow 的入口
+│       ├── server/
+│       │   ├── __init__.py      # 导出 TabRegistry, RemoteSession, TabSession, create_app, run_server
+│       │   ├── registry.py      # TabRegistry — 标签状态、WS连接、执行 Futures、chromeTabId 映射
+│       │   ├── api.py           # RemoteSession — Python API (open/close/list/execute/coordinates/activate/reload)
+│       │   ├── session.py       # TabSession — 基础设施层：服务器生命周期 + 标签管理 + 设备输入 + RemoteSession 代理
+│       │   └── app.py           # FastAPI app factory — WS 端点 `/api/ws` + `/exec/{execId}` HTTP 端点
+│       ├── pages/
+│       │   ├── __init__.py
+│       │   └── job_list.py      # BossJobListPage — 职位列表页面对象（选择器 + 操作方法）
+│       └── flows/
+│           ├── __init__.py
+│           └── scrape.py        # BossScrapeFlow — 爬取 + 沟通流程编排
 ├── extension/
 │   ├── manifest.json    # Chrome Extension MV3 清单
 │   ├── content.js       # 内容脚本 — WS 连接、JS 执行、元素坐标计算
 │   └── background.js    # Service Worker — WS ext 连接、tab 管理 (chrome.tabs API)
 ├── scripts/
 │   └── bosszhipin-remote.user.js  # (旧) 油猴脚本，推荐使用扩展替代
-├── scrape_jobs.py       # BossJobsAuto — 组合 TabSession + BossJobListPage + BossScrapeFlow 的入口
-├── analyze.py           # PageAnalyzer — 使用 TabSession 的页面分析工具
-├── main.py              # 启动入口
-├── AGENTS.md
 ├── pyproject.toml
+├── AGENTS.md
+├── README.md
 └── uv.lock
 ```
 
@@ -38,10 +42,11 @@ Chrome 扩展 + Python 服务，远程控制 Boss直聘页面，支持 JS 远程
 
 ```bash
 uv sync            # 安装/同步依赖
-uv run python main.py   # 启动服务 + 标签监控
+uv run python -m bzauto   # 启动服务 + 标签监控
+boss-server              # 等价，通过 CLI entry point
+boss-analyze             # 页面分析 CLI
+boss-scrape              # 抓取 CLI
 ```
-
-不需要 `uv run` 以外的启动方式。
 
 ## 扩展安装
 
@@ -112,7 +117,7 @@ TabSession  ← 组合 — PageObject  ← 组合 — Flow
 ## TabSession API（推荐）
 
 ```python
-from server import TabSession
+from bzauto.server import TabSession
 
 async with TabSession() as session:
     # 打开/连接标签
@@ -146,7 +151,7 @@ async with TabSession() as session:
 ## RemoteSession API（底层，一般通过 TabSession 代理调用）
 
 ```python
-from server import TabRegistry, RemoteSession
+from bzauto.server import TabRegistry, RemoteSession
 
 registry = TabRegistry()
 session = RemoteSession(registry)
@@ -160,7 +165,6 @@ registry.on("execution_result", lambda m: print(f"执行结果: {m.get('data')}"
 
 # 打开 URL（走扩展 chrome.tabs.create）
 tab = await session.open_tab("https://www.zhipin.com/")
-# tab == {chromeTabId: 42, uuid: "xxx-yyy", url: "...", title: "..."}
 
 # 执行 JS（world="main" 通过 /exec/{execId} 绕过 CSP）
 result = await session.execute(tab["uuid"], "document.title", timeout=30.0)
@@ -191,7 +195,7 @@ tracked = session.list_tracked_tabs()
 ### 用法
 
 ```python
-from analyze import PageAnalyzer
+from bzauto.analyze import PageAnalyzer
 
 async def main():
     async with PageAnalyzer() as pa:
@@ -233,7 +237,7 @@ async def main():
 3. 先用 `dump_common_elements()` 看有哪些弹窗类元素
 4. 用 `find_text("留在此页")` 定位目标文本
 5. 用 `bbox()` 获取点击坐标
-6. 将确定的选择器和流程搬进 `scrape_jobs.py`
+6. 将确定的选择器和流程搬进 `src/bzauto/scrape_jobs.py`
 
 ## 约定
 

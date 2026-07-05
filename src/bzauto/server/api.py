@@ -2,7 +2,7 @@
 
 Usage::
 
-    from server import TabRegistry, RemoteSession, create_app
+    from bzauto import TabRegistry, RemoteSession, create_app
 
     registry = TabRegistry()
     session = RemoteSession(registry)
@@ -37,25 +37,17 @@ class RemoteSession:
     def __init__(self, registry: "TabRegistry") -> None:
         self._registry = registry
 
-    # ── event subscription ───────────────────────────────────────
-
     def on(self, event: str, callback: Callable) -> None:
         self._registry.on(event, callback)
 
     def off(self, event: str, callback: Callable | None = None) -> None:
         self._registry.off(event, callback)
 
-    # ── tab lifecycle ─────────────────────────────────────────
-
     async def open_tab(
         self,
         url: str,
         timeout: float = 15.0,
     ) -> dict[str, Any]:
-        """Open *url* in a new Chrome tab.
-
-        Returns ``{chromeTabId, url}`` immediately after tab creation.
-        """
         if not self._registry.is_connected():
             raise ConnectionError("扩展后台未连接")
         result = await self._registry.send("open_tab", timeout=timeout, url=url)
@@ -67,7 +59,6 @@ class RemoteSession:
         chrome_tab_id: int,
         timeout: float = 10.0,
     ) -> dict[str, Any]:
-        """Close a Chrome tab by its ``chromeTabId``."""
         return await self._registry.send(
             "close_tab", timeout=timeout, chromeTabId=chrome_tab_id
         )
@@ -77,10 +68,6 @@ class RemoteSession:
         chrome_tab_id: int,
         timeout: float = 10.0,
     ) -> bool:
-        """Activate a Chrome tab: bring its window to front and focus.
-
-        Returns ``True`` on success.
-        """
         result = await self._registry.send(
             "activate_tab", timeout=timeout, chromeTabId=chrome_tab_id
         )
@@ -93,36 +80,20 @@ class RemoteSession:
         chrome_tab_id: int,
         timeout: float = 15.0,
     ) -> dict[str, Any]:
-        """Reload a Chrome tab, returns ``{chromeTabId}``."""
         return await self._registry.send(
             "reload_tab", timeout=timeout, chromeTabId=chrome_tab_id
         )
 
     async def list_tabs(self) -> list[dict[str, Any]]:
-        """List all Chrome tabs via extension API.
-
-        Each entry contains ``chromeTabId``, ``url``, ``title``, ``active``,
-        ``windowId``.
-        """
         return await self._registry.send("list_tabs", timeout=10.0)
 
-    # ── local state access (no WS roundtrip) ──────────────────
-
     def list_tracked_tabs(self) -> list[dict[str, Any]]:
-        """Return all tracked tabs (synced from background events).
-
-        Each entry contains ``chromeTabId``, ``url``, ``title``, ``status``,
-        ``active``, ``windowId``.
-        """
         return self._registry.tabs
 
-    list_connected_tabs = list_tracked_tabs  # backward compat
+    list_connected_tabs = list_tracked_tabs
 
     def get_tab(self, chrome_tab_id: int) -> dict[str, Any] | None:
-        """Return tracked info for a single tab by its ``chromeTabId``."""
         return self._registry.get_tab(chrome_tab_id)
-
-    # ── execute (raw JS via chrome.scripting) ─────────────────
 
     async def execute(
         self,
@@ -131,21 +102,6 @@ class RemoteSession:
         world: str = "main",
         timeout: float = 30.0,
     ) -> Any:
-        """Execute JavaScript on a tab.
-
-        Parameters
-        ----------
-        chrome_tab_id :
-            Target tab ID.
-        code :
-            JavaScript source code.
-        world :
-            ``"main"`` (default) — inject ``<script src="/exec/{execId}">``, bypass CSP,
-            can access page JS variables.
-            ``"isolated"`` — via content.js ``eval()`` (may fail on CSP pages).
-        timeout :
-            Max seconds to wait for a result.
-        """
         if world == "main":
             exec_id = str(uuid.uuid4())
             wrapped = (
@@ -167,8 +123,6 @@ class RemoteSession:
             chromeTabId=chrome_tab_id, code=code, world=world,
         )
 
-    # ── declarative DOM query ─────────────────────────────────
-
     async def query(
         self,
         chrome_tab_id: int,
@@ -178,25 +132,6 @@ class RemoteSession:
         return_: str = "list",
         timeout: float = 30.0,
     ) -> Any:
-        """Declarative DOM query on a tab (via ``chrome.scripting``).
-
-        Parameters
-        ----------
-        chrome_tab_id :
-            Target tab ID.
-        select :
-            CSS selector for ``querySelectorAll``.
-        filter :
-            Optional filter dict with ``textContains``, ``textAny``,
-            ``textNone``, ``index``, ``nth``.
-        project :
-            Dict mapping output keys to ``subSelector@attr`` specs.
-        return_ :
-            One of ``"bbox"``, ``"bboxList"``, ``"list"``, ``"first"``,
-            ``"count"``, ``"raw"``.
-        timeout :
-            Max seconds to wait.
-        """
         result = await self._registry.send(
             "query", timeout=timeout,
             chromeTabId=chrome_tab_id, select=select,
@@ -213,11 +148,6 @@ class RemoteSession:
         filter: dict | None = None,
         timeout: float = 30.0,
     ) -> dict | None:
-        """Convenience: query bbox of first matching element.
-
-        Returns ``{css: {x,y,w,h,cx,cy}, physical: {x,y,w,h,cx,cy}}``
-        or ``None`` if no match.
-        """
         return await self.query(
             chrome_tab_id, select=select, filter=filter,
             return_="bbox", timeout=timeout,

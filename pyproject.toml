@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "bosszhipin-auto"
+name = "bzauto"
 version = "0.1.0"
-description = "Boss直聘远程控制 — 油猴脚本 + Python 服务，支持 JS 远程执行"
+description = "Boss直聘远程控制 — Chrome 扩展 + Python 服务，支持 JS 远程执行"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,3 +14,11 @@ dependencies = [
     "pyautogui>=0.9.54",
     "keyboard>=0.13.5",
 ]
+
+[project.scripts]
+boss-server = "bzauto.__main__:cli_main"
+boss-analyze = "bzauto.analyze:cli_main"
+boss-scrape = "bzauto.scrape_jobs:cli_main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
