@@ -3,11 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from starlette.responses import Response
 import uvicorn
 
 from server.registry import TabRegistry
@@ -16,10 +14,10 @@ logger = logging.getLogger("boss.server")
 
 
 def create_app(registry: TabRegistry | None = None) -> FastAPI:
-    """Build the FastAPI app with WebSocket endpoints for userscript comms.
+    """Build the FastAPI app with a single WebSocket endpoint ``/api/ws``.
 
-    Only WebSocket endpoints are exposed — the Python API
-    (:class:`RemoteController`) is used directly from code.
+    The extension background.js connects here and handles all tab operations
+    via ``chrome.tabs.*`` and ``chrome.scripting.executeScript``.
     """
     if registry is None:
         registry = TabRegistry()
@@ -33,36 +31,18 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
 
     app = FastAPI(title="Boss直聘远程控制", lifespan=lifespan)
 
-    # ── Tab WebSocket (userscripts) ────────────────────────────
-
-    @app.websocket("/api/ws/tab")
-    async def tab_websocket(ws: WebSocket):
-        tab_id: str | None = None
+    @app.websocket("/api/ws")
+    async def bg_websocket(ws: WebSocket):
         await ws.accept()
+        registry.set_ws(ws)
+        logger.info("[*] 扩展后台已连接")
         try:
             while True:
                 raw = await ws.receive_text()
                 msg = json.loads(raw)
                 t = msg.get("type")
 
-                if t == "register":
-                    tab_id = msg.get("tabId", str(uuid.uuid4()))
-                    registry.register(
-                        tab_id,
-                        url=msg.get("url", ""),
-                        title=msg.get("title", ""),
-                        ws=ws,
-                    )
-                    await ws.send_text(
-                        json.dumps({"type": "registered", "tabId": tab_id})
-                    )
-
-                elif t == "unregister":
-                    if tab_id:
-                        registry.unregister(tab_id)
-                    break
-
-                elif t == "result":
+                if t == "result":
                     cmd_id = msg.get("id")
                     if cmd_id:
                         registry.resolve_result(
@@ -72,104 +52,29 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
                         )
                     registry._broadcast({
                         "type": "execution_result",
-                        "tabId": tab_id,
                         "id": cmd_id,
                         "data": msg.get("data"),
                         "error": msg.get("error"),
                     })
 
-                elif t == "pong":
+                elif t in (
+                    "sync_state",
+                    "tab_created",
+                    "tab_updated",
+                    "tab_closed",
+                    "tab_activated",
+                ):
+                    registry.handle_tab_event(msg)
+
+                elif t == "ping":
                     pass
 
         except WebSocketDisconnect:
-            logger.info("[-] 标签断开: %s", (tab_id or "?")[:8])
+            logger.info("[-] 扩展后台断开")
         except Exception as e:
-            logger.error("[!] 标签WS异常 (%s): %s", tab_id, e)
+            logger.error("[!] 扩展WS异常: %s", e)
         finally:
-            if tab_id:
-                registry.unregister(tab_id)
-
-    # ── Control WebSocket (CLI / monitoring) ───────────────────
-
-    @app.websocket("/api/ws/control")
-    async def control_websocket(ws: WebSocket):
-        await ws.accept()
-        registry.add_control_client(ws)
-        logger.info("[*] 控制端已连接")
-        try:
-            await ws.send_text(
-                json.dumps({"type": "state", "tabs": registry.tabs})
-            )
-            while True:
-                raw = await ws.receive_text()
-                msg = json.loads(raw)
-
-                msg_type = msg.get("type", "")
-
-                if msg_type in ("execute", "get_coordinates", "activate"):
-                    tab_id = msg["tabId"]
-                    if not registry.is_connected(tab_id):
-                        await ws.send_text(
-                            json.dumps({
-                                "type": "error",
-                                "message": f"标签 {tab_id} 未连接",
-                            })
-                        )
-                        continue
-
-                    try:
-                        if msg_type == "execute":
-                            ctx = msg.get("context", "page")
-                            code = msg.get("code", "")
-                            result = await registry.send_execute(
-                                tab_id, code, ctx
-                            )
-                        elif msg_type == "get_coordinates":
-                            selector = msg.get("selector", "")
-                            result = await registry.send_get_coordinates(
-                                tab_id, selector
-                            )
-                        elif msg_type == "activate":
-                            result = await registry.send_activate(tab_id)
-
-                        await ws.send_text(
-                            json.dumps({
-                                "type": "result",
-                                "id": msg.get("id", uuid.uuid4().hex[:12]),
-                                "tabId": tab_id,
-                                "data": result,
-                                "error": None,
-                            })
-                        )
-                    except Exception as e:
-                        await ws.send_text(
-                            json.dumps({
-                                "type": "result",
-                                "tabId": tab_id,
-                                "data": None,
-                                "error": str(e),
-                            })
-                        )
-
-        except WebSocketDisconnect:
-            pass
-        except Exception as e:
-            logger.error("[!] 控制WS异常: %s", e)
-        finally:
-            registry.remove_control_client(ws)
-
-    # ── Script execution endpoint (bypass CSP) ─────────────────
-
-    @app.get("/exec/{cmd_id}")
-    async def serve_exec_script(cmd_id: str):
-        script = registry.get_pending_script(cmd_id)
-        if script is None:
-            return Response(
-                content="console.error('[BossRemote] 脚本未找到或已过期:', " +
-                        json.dumps(cmd_id) + ");",
-                media_type="application/javascript",
-            )
-        return Response(content=script, media_type="application/javascript")
+            registry.remove_ws()
 
     return app
 

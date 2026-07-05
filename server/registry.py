@@ -4,7 +4,6 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
 from collections.abc import Callable
 from typing import Any, TYPE_CHECKING
 
@@ -14,32 +13,41 @@ if TYPE_CHECKING:
 logger = logging.getLogger("boss.registry")
 
 
+class ElementNotFound(LookupError):
+    """Raised when a bbox/query selector matches no elements."""
+
+    def __init__(self, selector: str, filter: dict | None = None) -> None:
+        self.selector = selector
+        self.filter = filter
+        ctx = f"selector={selector!r}"
+        if filter:
+            ctx += f" filter={filter!r}"
+        super().__init__(f"未找到匹配元素: {ctx}")
+
+
 class TabRegistry:
-    """Shared state: tab metadata, WebSocket connections, pending execution futures."""
+    """Shared state: tab metadata (from bg events), WS connection, pending futures."""
 
     def __init__(self) -> None:
-        self._tabs: dict[str, dict[str, Any]] = {}
-        self._connections: dict[str, WebSocket] = {}
+        self._ws: WebSocket | None = None
+        self._tabs: dict[int, dict[str, Any]] = {}
         self._pending: dict[str, asyncio.Future] = {}
-        self._pending_scripts: dict[str, str] = {}
-        self._control_clients: list[WebSocket] = []
         self._event_handlers: dict[str, list[Callable]] = {}
 
     # ── event subscription ───────────────────────────────────────
 
     def on(self, event: str, callback: Callable) -> None:
-        """Register a local callback for an event.
+        """Subscribe to a semantic event.
 
-        Events:
-        - ``tab_connected``     - received ``dict`` with key ``"tab"``
-        - ``tab_disconnected``  - received ``dict`` with key ``"tabId"``
-        - ``execution_result``  - received ``dict`` with keys
-                                  ``"tabId"``, ``"id"``, ``"data"``, ``"error"``
+        Supported events:
+          tab_ready   — tab entered registry. Payload: tab fields + source ("sync"|"created"|"updated")
+          tab_changed — tab fields changed. Payload: tab fields + changes dict
+          tab_gone    — tab left registry. Payload: tab fields + source ("closed"|"sync_removed")
+          execution_result — JS execution result. Payload: id, data, error
         """
         self._event_handlers.setdefault(event, []).append(callback)
 
     def off(self, event: str, callback: Callable | None = None) -> None:
-        """Unregister a callback.  If *callback* is ``None``, clears all for the event."""
         if callback is None:
             self._event_handlers.pop(event, None)
         else:
@@ -49,7 +57,6 @@ class TabRegistry:
                 pass
 
     def _broadcast(self, msg: dict) -> None:
-        # Local callbacks
         for cb in self._event_handlers.get(msg.get("type", ""), []):
             try:
                 result = cb(msg)
@@ -58,101 +65,30 @@ class TabRegistry:
                         loop = asyncio.get_running_loop()
                         loop.create_task(result)
                     except RuntimeError:
-                        logger.warning(
-                            "跳过异步回调（无运行中的事件循环）: %s",
-                            msg.get("type", ""),
-                        )
+                        logger.warning("跳过异步回调: %s", msg.get("type", ""))
             except Exception as e:
                 logger.error("事件回调异常 (%s): %s", msg.get("type", ""), e)
-        # WS control clients
-        for ws in self._control_clients[:]:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(ws.send_text(json.dumps(msg)))
-            except RuntimeError:
-                pass
-            except Exception:
-                self.remove_control_client(ws)
 
-    # ── tab lifecycle ────────────────────────────────────────────
+    # ── WebSocket connection ──────────────────────────────────────
 
-    def register(self, tab_id: str, url: str, title: str, ws: WebSocket) -> None:
-        self._tabs[tab_id] = {
-            "tab_id": tab_id,
-            "url": url,
-            "title": title,
-            "connected_at": datetime.now(timezone.utc).isoformat(),
-        }
-        self._connections[tab_id] = ws
-        logger.info("[+] 标签注册: %s - %s", tab_id[:8], title)
-        self._broadcast({"type": "tab_connected", "tab": self._tabs[tab_id]})
+    def set_ws(self, ws: WebSocket) -> None:
+        self._ws = ws
 
-    def unregister(self, tab_id: str) -> None:
-        info = self._tabs.pop(tab_id, None)
-        self._connections.pop(tab_id, None)
-        for cid, fut in list(self._pending.items()):
-            if not fut.done():
-                fut.set_exception(ConnectionError(f"标签 {tab_id[:8]} 已断开"))
-            self._pending.pop(cid, None)
-            self._pending_scripts.pop(cid, None)
-        self._broadcast({"type": "tab_disconnected", "tabId": tab_id})
-        if info:
-            logger.info("[-] 标签注销: %s - %s", tab_id[:8], info.get("title", ""))
+    def remove_ws(self) -> None:
+        self._ws = None
 
-    def is_connected(self, tab_id: str) -> bool:
-        return tab_id in self._connections
+    def is_connected(self) -> bool:
+        return self._ws is not None
 
-    @property
-    def tabs(self) -> list[dict[str, Any]]:
-        return list(self._tabs.values())
-
-    def get_tab(self, tab_id: str) -> dict[str, Any] | None:
-        return self._tabs.get(tab_id)
-
-    # ── execution ────────────────────────────────────────────────
-
-    async def send_execute(
+    async def send(
         self,
-        tab_id: str,
-        code: str,
-        context: str = "page",
-        timeout: float = 30.0,
-    ) -> Any:
-        ws = self._connections.get(tab_id)
-        if ws is None:
-            raise ValueError(f"标签 {tab_id[:8]} 未连接")
-
-        cmd_id = str(uuid.uuid4())
-        loop = asyncio.get_running_loop()
-        fut = loop.create_future()
-        self._pending[cmd_id] = fut
-        self._pending_scripts[cmd_id] = code
-
-        payload = {
-            "type": "execute",
-            "id": cmd_id,
-            "context": context,
-            "code": code,
-        }
-        await ws.send_text(json.dumps(payload))
-
-        try:
-            return await asyncio.wait_for(fut, timeout=timeout)
-        except asyncio.TimeoutError:
-            self._pending.pop(cmd_id, None)
-            self._pending_scripts.pop(cmd_id, None)
-            raise TimeoutError(f"执行超时 ({timeout}s)")
-
-    async def send_simple(
-        self,
-        tab_id: str,
         msg_type: str,
         timeout: float = 10.0,
         **extra: Any,
     ) -> Any:
-        ws = self._connections.get(tab_id)
+        ws = self._ws
         if ws is None:
-            raise ValueError(f"标签 {tab_id[:8]} 未连接")
+            raise ConnectionError("扩展后台未连接")
 
         cmd_id = str(uuid.uuid4())
         loop = asyncio.get_running_loop()
@@ -168,25 +104,7 @@ class TabRegistry:
             self._pending.pop(cmd_id, None)
             raise TimeoutError(f"{msg_type} 超时 ({timeout}s)")
 
-    async def send_get_coordinates(
-        self,
-        tab_id: str,
-        selector: str,
-        timeout: float = 30.0,
-    ) -> Any:
-        return await self.send_simple(
-            tab_id, "get_coordinates", timeout=timeout, selector=selector
-        )
-
-    async def send_activate(
-        self,
-        tab_id: str,
-        timeout: float = 10.0,
-    ) -> Any:
-        return await self.send_simple(tab_id, "activate", timeout=timeout)
-
     def resolve_result(self, cmd_id: str, data: Any, error: str | None) -> None:
-        self._pending_scripts.pop(cmd_id, None)
         fut = self._pending.pop(cmd_id, None)
         if fut is not None and not fut.done():
             if error:
@@ -194,57 +112,116 @@ class TabRegistry:
             else:
                 fut.set_result(data)
 
-    def get_pending_script(self, cmd_id: str) -> str | None:
-        code = self._pending_scripts.get(cmd_id)
-        if code is None:
-            return None
-        # 清空避免重复使用
-        self._pending_scripts.pop(cmd_id, None)
-        # 构造绕过 CSP 的包装脚本
-        escaped_id = json.dumps(cmd_id)
-        return f"""
-(async function() {{
-  const __boss_id__ = {escaped_id};
-  try {{
-    const result = await (async function() {{ {code} }})();
-    window.dispatchEvent(new CustomEvent('__boss_result', {{
-      detail: {{
-        id: __boss_id__,
-        data: JSON.parse(JSON.stringify(result)),
-        error: null
-      }}
-    }}));
-  }} catch(e) {{
-    window.dispatchEvent(new CustomEvent('__boss_result', {{
-      detail: {{
-        id: __boss_id__,
-        data: null,
-        error: e.toString() + '\\\\n' + (e.stack || '')
-      }}
-    }}));
-  }}
-}})();
-"""
+    # ── tab state (driven by bg events) ──────────────────────────
 
-    # ── control clients ─────────────────────────────────────────
+    def handle_tab_event(self, msg: dict) -> None:
+        t = msg.get("type")
 
-    def add_control_client(self, ws: WebSocket) -> None:
-        self._control_clients.append(ws)
+        if t == "sync_state":
+            new_tabs: dict[int, dict] = {}
+            for tb in msg.get("tabs", []):
+                ctid = tb.get("chromeTabId")
+                if ctid is not None:
+                    new_tabs[ctid] = tb
 
-    def remove_control_client(self, ws: WebSocket) -> None:
-        if ws in self._control_clients:
-            self._control_clients.remove(ws)
+            old_ids = set(self._tabs.keys())
+            new_ids = set(new_tabs.keys())
 
-    # ── cleanup ─────────────────────────────────────────────────
+            for ctid in old_ids - new_ids:
+                tb = self._tabs[ctid]
+                logger.info("[-] 标签从同步消失: chromeTabId=%s", ctid)
+                self._broadcast({"type": "tab_gone", "chromeTabId": ctid, "source": "sync_removed", **tb})
+
+            for ctid in new_ids - old_ids:
+                tb = new_tabs[ctid]
+                logger.info("[+] 标签同步: chromeTabId=%s url=%s", ctid, tb.get("url", "")[:60])
+                self._broadcast({"type": "tab_ready", "chromeTabId": ctid, "source": "sync", **tb})
+
+            for ctid in old_ids & new_ids:
+                old = self._tabs[ctid]
+                new = new_tabs[ctid]
+                changes = {}
+                for key in ("url", "title", "status", "active"):
+                    if key in new and old.get(key) != new[key]:
+                        changes[key] = new[key]
+                if changes:
+                    self._broadcast({"type": "tab_changed", "chromeTabId": ctid, "changes": changes, **new})
+
+            self._tabs = new_tabs
+            logger.info("[同步] 全量标签状态: %d 个标签", len(self._tabs))
+
+        elif t == "tab_created":
+            ctid = msg.get("chromeTabId")
+            if ctid is not None:
+                tb = {
+                    "chromeTabId": ctid,
+                    "url": msg.get("url", ""),
+                    "title": msg.get("title", ""),
+                    "status": msg.get("status", "loading"),
+                    "active": msg.get("active", False),
+                    "windowId": msg.get("windowId"),
+                }
+                self._tabs[ctid] = tb
+                logger.info("[+] 标签创建: chromeTabId=%s url=%s", ctid, msg.get("url", "")[:60])
+                self._broadcast({"type": "tab_ready", "chromeTabId": ctid, "source": "created", **tb})
+
+        elif t == "tab_updated":
+            ctid = msg.get("chromeTabId")
+            if ctid is not None:
+                if ctid in self._tabs:
+                    tb = self._tabs[ctid]
+                    changes = {}
+                    for key in ("url", "title", "status"):
+                        if key in msg and msg[key] is not None and tb.get(key) != msg[key]:
+                            changes[key] = msg[key]
+                            tb[key] = msg[key]
+                    if changes:
+                        self._broadcast({"type": "tab_changed", "chromeTabId": ctid, "changes": changes, **tb})
+                else:
+                    # race: onUpdated before sync_state
+                    tb = {
+                        "chromeTabId": ctid,
+                        "url": msg.get("url", ""),
+                        "title": msg.get("title", ""),
+                        "status": msg.get("status", "loading"),
+                        "active": msg.get("active", False),
+                        "windowId": msg.get("windowId"),
+                    }
+                    self._tabs[ctid] = tb
+                    logger.info("[+] 标签更新(竞态): chromeTabId=%s url=%s", ctid, tb.get("url", "")[:60])
+                    self._broadcast({"type": "tab_ready", "chromeTabId": ctid, "source": "updated", **tb})
+
+        elif t == "tab_closed":
+            ctid = msg.get("chromeTabId")
+            if ctid is not None and ctid in self._tabs:
+                tb = self._tabs.pop(ctid)
+                logger.info("[-] 标签关闭: chromeTabId=%s", ctid)
+                self._broadcast({"type": "tab_gone", "chromeTabId": ctid, "source": "closed", **tb})
+
+        elif t == "tab_activated":
+            ctid = msg.get("chromeTabId")
+            if ctid is not None:
+                for tid in self._tabs:
+                    new_active = (tid == ctid)
+                    if self._tabs[tid]["active"] != new_active:
+                        self._tabs[tid]["active"] = new_active
+                        self._broadcast({"type": "tab_changed", "chromeTabId": tid, "changes": {"active": new_active}, **self._tabs[tid]})
+
+    # ── tab access ────────────────────────────────────────────────
+
+    @property
+    def tabs(self) -> list[dict[str, Any]]:
+        return list(self._tabs.values())
+
+    def get_tab(self, chrome_tab_id: int) -> dict[str, Any] | None:
+        return self._tabs.get(chrome_tab_id)
+
+    # ── cleanup ──────────────────────────────────────────────────
 
     async def close_all(self) -> None:
-        for ws in list(self._connections.values()):
+        if self._ws is not None:
             try:
-                await ws.close()
+                await self._ws.close()
             except Exception:
                 pass
-        for ws in list(self._control_clients):
-            try:
-                await ws.close()
-            except Exception:
-                pass
+            self._ws = None

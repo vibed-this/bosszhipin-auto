@@ -1,28 +1,23 @@
-"""Python API: open / close / list browser tabs and execute JS remotely.
+"""Python API: remote browser tab control via Chrome extension.
 
 Usage::
 
-    from server.registry import TabRegistry
-    from server.api import RemoteSession
-    from server.main import create_app, run_server
+    from server import TabRegistry, RemoteSession, create_app
 
     registry = TabRegistry()
     session = RemoteSession(registry)
     app = create_app(registry)
 
     # Start the WebSocket server in a background task, then:
-    tabs = session.list_tabs()
-    result = await session.execute(tab_id, "document.title")
-    tab_id = await session.open_url("https://www.zhipin.com/")
-    await session.close_tab(tab_id)
+    tabs = await session.list_tabs()
+    result = await session.execute(42, "document.title")
+    tab = await session.open_tab("https://www.zhipin.com/")
+    await session.close_tab(tab["chromeTabId"])
 """
 
 from __future__ import annotations
 
-import asyncio
-import json
 import logging
-import webbrowser
 from collections.abc import Callable
 from typing import Any
 
@@ -32,7 +27,9 @@ logger = logging.getLogger("boss.api")
 class RemoteSession:
     """High-level Python API for remote browser tab control.
 
-    All methods are thread-safe when called from an async context.
+    All operations go through the extension background WebSocket,
+    which uses ``chrome.scripting.executeScript`` for JS execution
+    and ``chrome.tabs.*`` for tab management.
     """
 
     def __init__(self, registry: "TabRegistry") -> None:
@@ -41,128 +38,168 @@ class RemoteSession:
     # ── event subscription ───────────────────────────────────────
 
     def on(self, event: str, callback: Callable) -> None:
-        """Register a local callback for a registry event.
-
-        See :meth:`TabRegistry.on` for available events.
-        """
         self._registry.on(event, callback)
 
     def off(self, event: str, callback: Callable | None = None) -> None:
-        """Unregister a local callback.
-
-        See :meth:`TabRegistry.off`.
-        """
         self._registry.off(event, callback)
 
-    # ── query ─────────────────────────────────────────────────
+    # ── tab lifecycle ─────────────────────────────────────────
 
-    def list_tabs(self) -> list[dict[str, Any]]:
-        """Return metadata for every connected tab."""
-        return self._registry.tabs
-
-    def get_tab(self, tab_id: str) -> dict[str, Any] | None:
-        """Return metadata for a single tab, or *None*."""
-        return self._registry.get_tab(tab_id)
-
-    # ── open / close ──────────────────────────────────────────
-
-    async def open_url(
+    async def open_tab(
         self,
         url: str,
-        wait_timeout: float = 15.0,
-    ) -> str | None:
-        """Open *url* in the default browser and wait for connection.
+        timeout: float = 15.0,
+    ) -> dict[str, Any]:
+        """Open *url* in a new Chrome tab.
 
-        Returns the ``tab_id`` that the userscript registered with,
-        or ``None`` if no tab connected within *wait_timeout* seconds.
+        Returns ``{chromeTabId, url}`` immediately after tab creation.
         """
-        webbrowser.open(url)
-        logger.info("打开 URL: %s", url)
+        if not self._registry.is_connected():
+            raise ConnectionError("扩展后台未连接")
+        result = await self._registry.send("open_tab", timeout=timeout, url=url)
+        logger.info("打开标签: chromeTabId=%s url=%s", result.get("chromeTabId"), url)
+        return result
 
-        deadline = asyncio.get_event_loop().time() + wait_timeout
-        while asyncio.get_event_loop().time() < deadline:
-            for tab in self._registry.tabs:
-                # Match by URL — the userscript sends the full URL on registration
-                if tab.get("url") == url:
-                    logger.info(
-                        "标签已连接: %s — %s", tab["tab_id"][:8], url
-                    )
-                    return tab["tab_id"]
-            await asyncio.sleep(0.5)
-
-        logger.warning("等待标签连接超时: %s", url)
-        return None
-
-    async def close_tab(self, tab_id: str) -> None:
-        """Send a close signal to the userscript and unregister.
-
-        The userscript will call ``window.close()`` in response.
-        Falls back to simply unregistering if the WebSocket is gone.
-        """
-        if self._registry.is_connected(tab_id):
-            ws = self._registry._connections.get(tab_id)
-            if ws is not None:
-                try:
-                    await ws.send_text(json.dumps({"type": "close"}))
-                    await asyncio.sleep(0.3)  # brief pause for delivery
-                except Exception:
-                    pass
-
-        self._registry.unregister(tab_id)
-        logger.info("关闭标签: %s", tab_id[:8])
-
-    # ── execute ───────────────────────────────────────────────
-
-    async def execute(
+    async def close_tab(
         self,
-        tab_id: str,
-        code: str,
-        context: str = "page",
-        timeout: float = 30.0,
-    ) -> Any:
-        """Execute JavaScript on a connected tab and return the result.
-
-        Parameters
-        ----------
-        tab_id :
-            Target tab identifier.
-        code :
-            JavaScript source code.
-        context :
-            ``"page"`` (browser window) or ``"gm"`` (extension scope).
-        timeout :
-            Max seconds to wait for a result.
-        """
-        return await self._registry.send_execute(tab_id, code, context, timeout)
-
-    # ── coordinates ───────────────────────────────────────────
-
-    async def get_element_coordinates(
-        self,
-        tab_id: str,
-        selector: str,
-        timeout: float = 30.0,
-    ) -> dict:
-        """Get screen coordinates of a DOM element on a connected tab.
-
-        Returns ``{css: {x, y}, physical: {x, y}, width, height}``
-        where ``css`` are CSS-logical pixels and ``physical`` are
-        system physical pixels (DPI-scaled, for RPA / AutoHotkey).
-        """
-        return await self._registry.send_get_coordinates(tab_id, selector, timeout)
-
-    # ── activate ──────────────────────────────────────────────
+        chrome_tab_id: int,
+        timeout: float = 10.0,
+    ) -> dict[str, Any]:
+        """Close a Chrome tab by its ``chromeTabId``."""
+        return await self._registry.send(
+            "close_tab", timeout=timeout, chromeTabId=chrome_tab_id
+        )
 
     async def activate_tab(
         self,
-        tab_id: str,
+        chrome_tab_id: int,
         timeout: float = 10.0,
     ) -> bool:
-        """Activate a connected tab: bring its window to front and focus the tab.
+        """Activate a Chrome tab: bring its window to front and focus.
 
         Returns ``True`` on success.
         """
-        result = await self._registry.send_activate(tab_id, timeout)
+        result = await self._registry.send(
+            "activate_tab", timeout=timeout, chromeTabId=chrome_tab_id
+        )
         if isinstance(result, dict):
             return result.get("success", False)
         return bool(result)
+
+    async def reload_tab(
+        self,
+        chrome_tab_id: int,
+        timeout: float = 15.0,
+    ) -> dict[str, Any]:
+        """Reload a Chrome tab, returns ``{chromeTabId}``."""
+        return await self._registry.send(
+            "reload_tab", timeout=timeout, chromeTabId=chrome_tab_id
+        )
+
+    async def list_tabs(self) -> list[dict[str, Any]]:
+        """List all Chrome tabs via extension API.
+
+        Each entry contains ``chromeTabId``, ``url``, ``title``, ``active``,
+        ``windowId``.
+        """
+        return await self._registry.send("list_tabs", timeout=10.0)
+
+    # ── local state access (no WS roundtrip) ──────────────────
+
+    def list_tracked_tabs(self) -> list[dict[str, Any]]:
+        """Return all tracked tabs (synced from background events).
+
+        Each entry contains ``chromeTabId``, ``url``, ``title``, ``status``,
+        ``active``, ``windowId``.
+        """
+        return self._registry.tabs
+
+    list_connected_tabs = list_tracked_tabs  # backward compat
+
+    def get_tab(self, chrome_tab_id: int) -> dict[str, Any] | None:
+        """Return tracked info for a single tab by its ``chromeTabId``."""
+        return self._registry.get_tab(chrome_tab_id)
+
+    # ── execute (raw JS via chrome.scripting) ─────────────────
+
+    async def execute(
+        self,
+        chrome_tab_id: int,
+        code: str,
+        world: str = "isolated",
+        timeout: float = 30.0,
+    ) -> Any:
+        """Execute JavaScript on a tab via ``chrome.scripting.executeScript``.
+
+        Parameters
+        ----------
+        chrome_tab_id :
+            Target tab ID.
+        code :
+            JavaScript source code.
+        world :
+            ``"isolated"`` (default, eval works regardless of page CSP) or
+            ``"main"`` (subject to page CSP).
+        timeout :
+            Max seconds to wait for a result.
+        """
+        return await self._registry.send(
+            "execute", timeout=timeout,
+            chromeTabId=chrome_tab_id, code=code, world=world,
+        )
+
+    # ── declarative DOM query ─────────────────────────────────
+
+    async def query(
+        self,
+        chrome_tab_id: int,
+        select: str,
+        filter: dict | None = None,
+        project: dict | None = None,
+        return_: str = "list",
+        timeout: float = 30.0,
+    ) -> Any:
+        """Declarative DOM query on a tab (via ``chrome.scripting``).
+
+        Parameters
+        ----------
+        chrome_tab_id :
+            Target tab ID.
+        select :
+            CSS selector for ``querySelectorAll``.
+        filter :
+            Optional filter dict with ``textContains``, ``textAny``,
+            ``textNone``, ``index``, ``nth``.
+        project :
+            Dict mapping output keys to ``subSelector@attr`` specs.
+        return_ :
+            One of ``"bbox"``, ``"bboxList"``, ``"list"``, ``"first"``,
+            ``"count"``, ``"raw"``.
+        timeout :
+            Max seconds to wait.
+        """
+        result = await self._registry.send(
+            "query", timeout=timeout,
+            chromeTabId=chrome_tab_id, select=select,
+            filter=filter, project=project, **{"return": return_},
+        )
+        if isinstance(result, dict) and "data" in result:
+            return result["data"]
+        return result
+
+    async def bbox(
+        self,
+        chrome_tab_id: int,
+        select: str,
+        filter: dict | None = None,
+        timeout: float = 30.0,
+    ) -> dict | None:
+        """Convenience: query bbox of first matching element.
+
+        Returns ``{css: {x,y,w,h,cx,cy}, physical: {x,y,w,h,cx,cy}}``
+        or ``None`` if no match.
+        """
+        return await self.query(
+            chrome_tab_id, select=select, filter=filter,
+            return_="bbox", timeout=timeout,
+        )

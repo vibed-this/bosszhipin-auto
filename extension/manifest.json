@@ -1,18 +1,18 @@
 {
   "manifest_version": 3,
   "name": "Boss直聘远程控制",
-  "version": "1.1.0",
-  "description": "远程控制Boss直聘页面，支持JS执行、元素坐标查询、标签激活",
+  "version": "2.0.0",
+  "description": "远程控制Boss直聘页面，支持JS执行、元素坐标查询",
   "permissions": [
-    "storage"
+    "storage",
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "https://*.zhipin.com/*",
-    "https://*.bosszhipin.com/*"
+    "https://*.bosszhipin.com/*",
+    "ws://127.0.0.1/*"
   ],
-  "background": {
-    "service_worker": "background.js"
-  },
   "content_scripts": [
     {
       "matches": [
@@ -22,5 +22,8 @@
       "js": ["content.js"],
       "run_at": "document_start"
     }
-  ]
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
 }
