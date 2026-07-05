@@ -6,11 +6,6 @@ import uvicorn
 
 from bzauto.server import TabRegistry, RemoteSession, create_app
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%H:%M:%S",
-)
 log = logging.getLogger("main")
 
 
@@ -48,6 +43,13 @@ def print_execution_result(msg: dict) -> None:
 
 async def main() -> None:
     host, port = "127.0.0.1", 8765
+
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logging.getLogger("boss").setLevel(logging.DEBUG)
 
     registry = TabRegistry()
     session = RemoteSession(registry)

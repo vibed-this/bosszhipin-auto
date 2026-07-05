@@ -56,7 +56,7 @@ class TabSession:
 
     async def ensure_tab(
         self,
-        url: str | None = None,
+        url: str,
         *,
         reuse_existing: bool = False,
         wait_for_tab: bool = False,
@@ -73,17 +73,20 @@ class TabSession:
                 for tab in self._registry.tabs:
                     if tab.get("url") == url:
                         self._tab_id = tab["chromeTabId"]
+                        assert self._tab_id is not None
                         log.info("复用标签: chromeTabId=%s", self._tab_id)
                         return self._tab_id
             result = await self._rsession.open_tab(url)
             self._tab_id = result["chromeTabId"]
             log.info("标签已创建: chromeTabId=%s", self._tab_id)
+            assert self._tab_id is not None
             return self._tab_id
 
         if self._registry.tabs:
             tab = self._registry.tabs[-1]
             self._tab_id = tab["chromeTabId"]
             log.info("使用已有标签: chromeTabId=%s", self._tab_id)
+            assert self._tab_id is not None
             return self._tab_id
 
         if not wait_for_tab:
@@ -104,6 +107,7 @@ class TabSession:
 
         self._tab_id = ready[0]["chromeTabId"]
         log.info("标签就绪: chromeTabId=%s", self._tab_id)
+        assert self._tab_id is not None
         return self._tab_id
 
     async def activate(self) -> None:

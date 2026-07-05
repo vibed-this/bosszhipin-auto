@@ -16,8 +16,6 @@
 
   function connect() {
     if (destroyed) return;
-    console.log("[BossRemote] 连接服务: " + WS_URL);
-
     let instance;
     try {
       instance = new WebSocket(WS_URL);
@@ -40,6 +38,7 @@
       if (ws !== instance) return;
       try {
         const msg = JSON.parse(event.data);
+        console.debug("[BossRemote] << 收到:", event.data.length > 200 ? event.data.slice(0, 200) + "..." : event.data);
         handleMessage(msg);
       } catch (e) {
         console.error("[BossRemote] 消息解析失败: " + e);
@@ -48,13 +47,19 @@
 
     instance.onclose = function (event) {
       stopPing();
+      if (event.code === 1006) {
+        if (!destroyed) scheduleReconnect();
+        return;
+      }
       console.log("[BossRemote] 断开 (code=" + event.code + ")");
       if (!destroyed) scheduleReconnect();
     };
 
     instance.onerror = function () {
       if (ws === instance) {
-        ws.close();
+        setTimeout(function () {
+          if (ws === instance) ws.close();
+        }, 0);
       }
     };
   }
@@ -81,17 +86,24 @@
   }
 
   function sendWS(data) {
+    const json = JSON.stringify(data);
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(data));
+      console.debug("[BossRemote] >> 发送:", data);
+      ws.send(json);
     } else {
+      console.debug("[BossRemote] >> 入队 (未连接):", data);
       sendQueue.push(data);
     }
   }
 
   function flushSendQueue() {
+    console.debug("[BossRemote] 刷新发送队列: " + sendQueue.length + " 条");
     while (sendQueue.length > 0) {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(sendQueue.shift()));
+        const data = sendQueue.shift();
+        const json = JSON.stringify(data);
+        console.debug("[BossRemote] >> 队列发送:", json.length > 100 ? json.slice(0, 100) + "..." : json);
+        ws.send(json);
       } else {
         break;
       }
@@ -161,6 +173,7 @@
 
   async function pushSyncState() {
     try {
+      console.debug("[BossRemote] 推送同步状态...");
       const tabs = await chrome.tabs.query({});
       const list = tabs.map(function (tab) {
         return {
@@ -172,6 +185,7 @@
           windowId: tab.windowId,
         };
       });
+      console.debug("[BossRemote] 同步标签数: " + list.length);
       sendWS({ type: "sync_state", tabs: list });
     } catch (e) {
       console.error("[BossRemote] sync_state 失败: " + e.message);
@@ -181,78 +195,103 @@
   // ── Message handlers ───────────────────────────────────────
 
   function handleMessage(msg) {
+    console.debug("[BossRemote] 处理消息:", msg.type, "id=" + (msg.id || ""));
     switch (msg.type) {
       case "open_tab":
+        console.debug("[BossRemote] 打开标签: url=" + msg.url);
         handleOpenTab(msg.id, msg.url);
         break;
       case "close_tab":
+        console.debug("[BossRemote] 关闭标签: chromeTabId=" + msg.chromeTabId);
         handleCloseTab(msg.id, msg.chromeTabId);
         break;
       case "activate_tab":
+        console.debug("[BossRemote] 激活标签: chromeTabId=" + msg.chromeTabId);
         handleActivateTab(msg.id, msg.chromeTabId);
         break;
       case "reload_tab":
+        console.debug("[BossRemote] 刷新标签: chromeTabId=" + msg.chromeTabId);
         handleReloadTab(msg.id, msg.chromeTabId);
         break;
       case "list_tabs":
+        console.debug("[BossRemote] 列出所有标签");
         handleListTabs(msg.id);
         break;
       case "execute":
+        console.debug("[BossRemote] 执行JS: chromeTabId=" + msg.chromeTabId + " execId=" + msg.execId);
         handleExecute(msg.id, msg.chromeTabId, msg.execId);
         break;
       case "query":
+        console.debug("[BossRemote] 查询DOM: chromeTabId=" + msg.chromeTabId + " select=" + msg.select);
         handleQuery(msg.id, msg.chromeTabId, msg.select, msg.filter, msg.project, msg["return"]);
         break;
       case "dump_html":
+        console.debug("[BossRemote] Dump HTML: chromeTabId=" + msg.chromeTabId);
         handleDumpHtml(msg.id, msg.chromeTabId);
         break;
+      default:
+        console.debug("[BossRemote] 未知消息类型:", msg.type);
     }
   }
 
   async function handleOpenTab(id, url) {
     try {
+      console.debug("[BossRemote] 创建标签页:", url);
       const tab = await chrome.tabs.create({ url: url });
+      console.debug("[BossRemote] 标签已创建: chromeTabId=" + tab.id);
       sendResult(id, { chromeTabId: tab.id, url: url }, null);
     } catch (e) {
+      console.error("[BossRemote] 打开标签失败:", e.message);
       sendResult(id, null, e.message);
     }
   }
 
   async function handleCloseTab(id, chromeTabId) {
     try {
+      console.debug("[BossRemote] 移除标签:", chromeTabId);
       await chrome.tabs.remove(chromeTabId);
+      console.debug("[BossRemote] 标签已移除");
       sendResult(id, { success: true }, null);
     } catch (e) {
+      console.error("[BossRemote] 关闭标签失败:", e.message);
       sendResult(id, null, e.message);
     }
   }
 
   async function handleActivateTab(id, chromeTabId) {
     try {
+      console.debug("[BossRemote] 激活标签窗口:", chromeTabId);
       const tab = await chrome.tabs.get(chromeTabId);
       const win = await chrome.windows.get(tab.windowId);
+      console.debug("[BossRemote] 窗口状态: " + win.state + ", windowId=" + tab.windowId);
       await chrome.tabs.update(chromeTabId, { active: true });
       await chrome.windows.update(tab.windowId, {
         state: win.state === "minimized" ? "normal" : win.state,
         focused: true,
       });
+      console.debug("[BossRemote] 标签已激活");
       sendResult(id, { success: true }, null);
     } catch (e) {
+      console.error("[BossRemote] 激活标签失败:", e.message);
       sendResult(id, null, e.message);
     }
   }
 
   async function handleReloadTab(id, chromeTabId) {
     try {
+      console.debug("[BossRemote] 刷新标签:", chromeTabId);
       await chrome.tabs.reload(chromeTabId);
+      console.debug("[BossRemote] 标签已刷新");
       sendResult(id, { chromeTabId: chromeTabId }, null);
     } catch (e) {
+      console.error("[BossRemote] 刷新标签失败:", e.message);
       sendResult(id, null, e.message);
     }
   }
 
   async function handleListTabs(id) {
     try {
+      console.debug("[BossRemote] 查询所有标签...");
       const tabs = await chrome.tabs.query({});
       const result = tabs.map(function (tab) {
         return {
@@ -263,8 +302,10 @@
           windowId: tab.windowId,
         };
       });
+      console.debug("[BossRemote] 标签数: " + result.length);
       sendResult(id, result, null);
     } catch (e) {
+      console.error("[BossRemote] 列出标签失败:", e.message);
       sendResult(id, null, e.message);
     }
   }
@@ -283,6 +324,7 @@
 
   async function handleExecuteMain(id, chromeTabId, execId) {
     try {
+      console.debug("[BossRemote] 执行MAIN world脚本: tab=" + chromeTabId + " execId=" + execId);
       const results = await chrome.scripting.executeScript({
         target: { tabId: chromeTabId },
         world: "ISOLATED",
@@ -316,8 +358,10 @@
         },
         args: [execId, HTTP_BASE],
       });
+      console.debug("[BossRemote] 脚本执行结果:", results[0]?.result !== undefined ? "成功" : "空");
       sendResult(id, results[0]?.result, null);
     } catch (e) {
+      console.error("[BossRemote] 脚本执行失败:", e.message);
       sendResult(id, null, e.message);
     }
   }
@@ -497,6 +541,8 @@
 
   async function handleQuery(id, chromeTabId, select, filter, project, return_) {
     try {
+      console.debug("[BossRemote] 执行DOM查询: tab=" + chromeTabId + " select=" + select + " return=" + (return_ || "list"));
+      console.debug("[BossRemote] 查询参数:", JSON.stringify({filter, project}));
       const results = await chrome.scripting.executeScript({
         target: { tabId: chromeTabId },
         world: "ISOLATED",
@@ -510,11 +556,14 @@
       });
       var result = results[0]?.result;
       if (result && result.__error__) {
+        console.error("[BossRemote] 查询错误:", result.__error__);
         sendResult(id, null, result.__error__);
       } else {
+        console.debug("[BossRemote] 查询成功: matched=" + (result?._meta?.matched || 0) + " took=" + (result?._meta?.tookMs || 0) + "ms");
         sendResult(id, result, null);
       }
     } catch (e) {
+      console.error("[BossRemote] 查询失败:", e.message);
       sendResult(id, null, e.message);
     }
   }

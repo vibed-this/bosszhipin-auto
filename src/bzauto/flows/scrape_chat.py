@@ -20,14 +20,13 @@ class BossScrapeChatFlow:
 
     async def run(
         self,
-        url: str | None = None,
         *,
         max_scrolls: int = 0,
         output: str | Path | None = None,
     ) -> list[dict[str, Any]]:
         session = self._page._session
 
-        await session.ensure_tab(url)
+        await session.ensure_tab('https://www.zhipin.com/web/geek/chat')
         await session.activate()
 
         log.info("等待聊天页面加载...")

@@ -49,19 +49,28 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
                 msg = json.loads(raw)
                 t = msg.get("type")
 
+                logger.debug("<< 收到消息: type=%s id=%s", t, msg.get("id", ""))
+
                 if t == "result":
                     cmd_id = msg.get("id")
+                    error = msg.get("error")
+                    if error:
+                        logger.debug("结果包含错误: cmd_id=%s error=%s", cmd_id, error)
+                    else:
+                        data = msg.get("data")
+                        data_str = str(data) if data else "None"
+                        logger.debug("结果数据: cmd_id=%s data=%s", cmd_id, data_str[:200] if len(data_str) > 200 else data_str)
                     if cmd_id:
                         registry.resolve_result(
                             cmd_id,
                             data=msg.get("data"),
-                            error=msg.get("error"),
+                            error=error,
                         )
                     registry._broadcast({
                         "type": "execution_result",
                         "id": cmd_id,
                         "data": msg.get("data"),
-                        "error": msg.get("error"),
+                        "error": error,
                     })
 
                 elif t in (
@@ -71,12 +80,18 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
                     "tab_closed",
                     "tab_activated",
                 ):
+                    logger.debug("处理标签事件: type=%s", t)
                     registry.handle_tab_event(msg)
 
                 elif t == "ping":
+                    logger.debug("收到心跳")
                     pass
 
+                else:
+                    logger.debug("未知消息类型: %s", t)
+
         except asyncio.CancelledError:
+            logger.debug("WebSocket 连接被取消")
             pass
         except WebSocketDisconnect:
             logger.info("[-] 扩展后台断开")
@@ -95,9 +110,10 @@ def run_server(
 ) -> None:
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+    logging.getLogger("boss").setLevel(logging.DEBUG)
     app = create_app()
     uvicorn.run(
         app,

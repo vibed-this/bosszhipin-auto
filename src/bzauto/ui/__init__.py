@@ -16,6 +16,12 @@ from bzauto.pages.chat_list import BossChatListPage
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.server.session import TabSession
 
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+
 log = logging.getLogger("boss.ui")
 
 

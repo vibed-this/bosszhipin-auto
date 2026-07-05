@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import QTextEdit, QVBoxLayout, QWidget
 
@@ -12,8 +12,11 @@ from PySide6.QtWidgets import QTextEdit, QVBoxLayout, QWidget
 class LogWindow(QWidget):
     """日志窗口，作为标准 logging.Handler 接入日志体系。"""
 
+    log_message = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.log_message.connect(self._append)
         self.setWindowTitle("Boss直聘 - 日志")
         self.setWindowFlags(
             Qt.WindowType.WindowStaysOnTopHint
@@ -55,10 +58,9 @@ class LogWindow(QWidget):
         root = logging.getLogger()
         root.addHandler(self._file_handler)
         root.addHandler(self._gui_handler)
-        root.setLevel(logging.INFO)
 
-    def append(self, text: str) -> None:
-        """向窗口追加一行日志文本。由 _GuiHandler.emit 通过 QTimer 调用。"""
+    def _append(self, text: str) -> None:
+        """向窗口追加一行日志文本。由 log_message signal 触发。"""
         self._text.moveCursor(QTextCursor.MoveOperation.End)
         self._text.insertPlainText(text + "\n")
         scrollbar = self._text.verticalScrollBar()
@@ -73,7 +75,7 @@ class LogWindow(QWidget):
 
 
 class _GuiHandler(logging.Handler):
-    """将 logging 记录通过 QTimer.singleShot 投递到 LogWindow.append。"""
+    """将 logging 记录通过 LogWindow.log_message signal 投递到 GUI 线程。"""
 
     def __init__(self, window: LogWindow) -> None:
         super().__init__()
@@ -82,6 +84,6 @@ class _GuiHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
-            QTimer.singleShot(0, lambda m=msg: self._window.append(m))
+            self._window.log_message.emit(msg)
         except Exception:
             self.handleError(record)
