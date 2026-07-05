@@ -128,7 +128,7 @@ class RemoteSession:
         self,
         chrome_tab_id: int,
         code: str,
-        world: str = "isolated",
+        world: str = "main",
         timeout: float = 30.0,
     ) -> Any:
         """Execute JavaScript on a tab.
@@ -140,9 +140,9 @@ class RemoteSession:
         code :
             JavaScript source code.
         world :
-            ``"isolated"`` — via content.js ``eval()`` (may fail on CSP pages).
-            ``"main"`` — inject ``<script src="/exec/{execId}">``, bypass CSP,
+            ``"main"`` (default) — inject ``<script src="/exec/{execId}">``, bypass CSP,
             can access page JS variables.
+            ``"isolated"`` — via content.js ``eval()`` (may fail on CSP pages).
         timeout :
             Max seconds to wait for a result.
         """

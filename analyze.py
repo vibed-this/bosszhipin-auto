@@ -19,9 +19,7 @@ import asyncio
 import logging
 import sys
 
-import uvicorn
-
-from server import TabRegistry, RemoteSession, create_app
+from server.session import TabSession
 
 log = logging.getLogger("analyze")
 
@@ -30,31 +28,21 @@ class PageAnalyzer:
     """页面分析工具。"""
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
-        self._host = host
-        self._port = port
-        self._registry = TabRegistry()
-        self.session = RemoteSession(self._registry)
-        self._app = create_app(self._registry)
-        self._server: uvicorn.Server | None = None
-        self._tab_id: int | None = None
-
-    # ── 生命周期 ─────────────────────────────────────────────
+        self._session = TabSession(host, port)
 
     async def start(self) -> None:
-        config = uvicorn.Config(self._app, host=self._host, port=self._port, log_level="warning")
-        self._server = uvicorn.Server(config)
-        asyncio.create_task(self._server.serve())
+        await self._session.start()
         log.info("等待扩展连接...")
-        while not self._registry.is_connected():
+        while not self._session._registry.is_connected():
             await asyncio.sleep(0.5)
         log.info("扩展已连接，等待标签同步...")
-        while not self._registry.tabs:
+        while not self._session._registry.tabs:
             await asyncio.sleep(0.3)
-        log.info("已同步 %d 个标签", len(self._registry.tabs))
+        log.info("已同步 %d 个标签", len(self._session._registry.tabs))
+        await self._session.ensure_tab()
 
     async def stop(self) -> None:
-        if self._server:
-            self._server.should_exit = True
+        await self._session.stop()
 
     async def __aenter__(self) -> PageAnalyzer:
         await self.start()
@@ -63,41 +51,16 @@ class PageAnalyzer:
     async def __aexit__(self, *args: object) -> None:
         await self.stop()
 
-    # ── 标签管理 ─────────────────────────────────────────────
-
-    def _tid(self) -> int:
-        assert self._tab_id is not None
-        return self._tab_id
-
-    async def connect(self, url: str | None = None) -> dict:
-        """连接到已打开的 BOSS 直聘标签，或打开指定 URL。"""
-        tab = None
-        for t in self._registry.tabs:
-            if "zhipin.com" in (t.get("url", "") or ""):
-                tab = t
-                break
-        if not tab and self._registry.tabs:
-            tab = self._registry.tabs[-1]
-        if not tab and url:
-            tab = await self.session.open_tab(url)
-        if not tab:
-            raise RuntimeError("没有可用标签，请指定 url 参数")
-        self._tab_id = tab["chromeTabId"]
-        log.info("使用标签 %s: %s", self._tab_id, tab.get("url", ""))
-        await asyncio.sleep(2.0)
-        return tab
-
-    # ── 分析方法 ─────────────────────────────────────────────
+    async def connect(self, url: str | None = None) -> None:
+        await self._session.ensure_tab(url)
 
     async def scan(self, url: str | None = None) -> None:
-        """连接页面并扫描常见 UI 元素。"""
-        tab = await self.connect(url)
-        log.info("标签: %s", tab.get("url", ""))
+        await self.connect(url)
+        log.info("标签: %s", self._session.tab_id)
         await self.dump_common_elements()
 
     async def dump(self, selector: str, limit: int = 5) -> list[dict]:
-        """获取匹配指定 CSS 选择器的元素 HTML（raw）。"""
-        raw = await self.session.query(self._tid(), select=selector, return_="raw")
+        raw = await self._session.query(select=selector, return_="raw")
         if raw:
             log.info("[%s] %d 个匹配:", selector, len(raw))
             for i, r in enumerate(raw[:limit]):
@@ -106,12 +69,11 @@ class PageAnalyzer:
             log.info("[%s] 无匹配", selector)
         return raw or []
 
-    async def find_text(self, text: str, selector: str = "*", limit: int = 5) -> list[dict]:
-        """查找包含指定文本的元素。"""
-        raw = await self.session.query(
-            self._tid(), select=selector,
-            filter={"textContains": text},
-            return_="raw",
+    async def find_text(
+        self, text: str, selector: str = "*", limit: int = 5,
+    ) -> list[dict]:
+        raw = await self._session.query(
+            select=selector, filter={"textContains": text}, return_="raw",
         )
         if raw:
             log.info("「%s」找到 %d 个:", text, len(raw))
@@ -122,11 +84,9 @@ class PageAnalyzer:
         return raw or []
 
     async def bbox(self, selector: str, **filter_kw: object) -> dict | None:
-        """获取元素坐标（自动 scrollIntoView）。"""
-        return await self.session.bbox(self._tid(), select=selector, filter=filter_kw or None)
+        return await self._session.bbox(select=selector, filter=filter_kw or None)
 
     async def dump_common_elements(self) -> None:
-        """扫描页面中常见的 UI 组件。"""
         groups = [
             ("职位列表", [".job-list-box", "li.job-card-box", ".job-card-wrapper"]),
             ("弹窗", [
@@ -141,15 +101,14 @@ class PageAnalyzer:
         ]
         for label, selectors in groups:
             for sel in selectors:
-                raw = await self.session.query(self._tid(), select=sel, return_="raw")
+                raw = await self._session.query(select=sel, return_="raw")
                 if raw:
                     log.info("  [%s] %s: %d 个", label, sel, len(raw))
                     for r in raw[:1]:
                         log.info("    例: %s", r["html"][:200])
 
     async def dump_visible_dialogs(self) -> list[dict]:
-        """查找所有可见的弹窗（通过 JS 检查 offsetParent），仅在 CSP 允许时工作。"""
-        result = await self.session.execute(self._tid(), """
+        result = await self._session.execute("""
             (function() {
                 var all = document.querySelectorAll('[class*=\"dialog\"],[class*=\"modal\"],[class*=\"popup\"],.mask');
                 var visible = [];
@@ -172,18 +131,15 @@ class PageAnalyzer:
         if result:
             log.info("可见弹窗 %d 个:", len(result))
             for r in result:
-                log.info("  <%s> class=%r rect=%s", r["tag"], r.get("cls",""), r["rect"])
+                log.info("  <%s> class=%r rect=%s", r["tag"], r.get("cls", ""), r["rect"])
                 log.info("    %s", r["html"][:300])
         else:
             log.info("无可见弹窗（或 CSP 拦截）")
         return result or []
 
     async def snapshot(self) -> str:
-        """返回页面 body 的前 2000 字符用于快速定位。"""
-        result = await self.session.execute(
-            self._tid(),
-            "document.body.innerHTML.slice(0, 2000)",
-            world="isolated",
+        result = await self._session.execute(
+            "document.body.innerHTML.slice(0, 2000)", world="isolated",
         )
         if result:
             for line in result.split("\n"):
@@ -196,7 +152,7 @@ async def main():
     async with PageAnalyzer() as pa:
         url = sys.argv[1] if len(sys.argv) > 1 else None
         await pa.scan(url)
-        log.info("\n=== 输入任意关键词搜索（传入命令行参数: python analyze.py <关键词>）===")
+        log.info("\n=== 输入任意关键词搜索 ===")
 
 
 if __name__ == "__main__":

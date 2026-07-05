@@ -9,16 +9,25 @@ Chrome 扩展 + Python 服务，远程控制 Boss直聘页面，支持 JS 远程
 
 ```
 ├── server/
-│   ├── __init__.py      # 导出 TabRegistry, RemoteSession, create_app, run_server
+│   ├── __init__.py      # 导出 TabRegistry, RemoteSession, TabSession, create_app, run_server
 │   ├── registry.py      # TabRegistry — 标签状态、WS连接、执行 Futures、chromeTabId 映射
 │   ├── api.py           # RemoteSession — Python API (open/close/list/execute/coordinates/activate/reload)
+│   ├── session.py       # TabSession — 基础设施层：服务器生命周期 + 标签管理 + 设备输入 + RemoteSession 代理
 │   └── main.py          # FastAPI app factory — WS 端点 `/api/ws` + `/exec/{execId}` HTTP 端点用于 MAIN world 执行
+├── pages/
+│   ├── __init__.py
+│   └── job_list.py      # BossJobListPage — BOSS直聘职位列表页面对象（选择器 + 操作方法）
+├── flows/
+│   ├── __init__.py
+│   └── scrape.py        # BossScrapeFlow — 爬取 + 沟通流程编排
 ├── extension/
 │   ├── manifest.json    # Chrome Extension MV3 清单
 │   ├── content.js       # 内容脚本 — WS 连接、JS 执行、元素坐标计算
 │   └── background.js    # Service Worker — WS ext 连接、tab 管理 (chrome.tabs API)
 ├── scripts/
 │   └── bosszhipin-remote.user.js  # (旧) 油猴脚本，推荐使用扩展替代
+├── scrape_jobs.py       # BossJobsAuto — 组合 TabSession + BossJobListPage + BossScrapeFlow 的入口
+├── analyze.py           # PageAnalyzer — 使用 TabSession 的页面分析工具
 ├── main.py              # 启动入口
 ├── AGENTS.md
 ├── pyproject.toml
@@ -52,7 +61,15 @@ uv run python main.py   # 启动服务 + 标签监控
 | **content.js** | 运行在 `*.zhipin.com/*` + `*.bosszhipin.com/*`。处理 background.js 发来的 `execute` 消息（content script eval）、监听 `window.postMessage` 回传结果 |
 | **background.js** | Service Worker。连接 `/api/ws`，处理 `open_tab` / `close_tab` / `activate_tab` / `reload_tab` / `list_tabs` / `execute` / `query`。自动重连 + ping keepalive |
 | **Python 服务** | FastAPI + WebSocket。`/api/ws` 接收 background.js 连接。`/exec/{execId}` HTTP 端点用于 MAIN world 代码注入（绕过 CSP）。所有 Python API 通过 `RemoteSession` 调用 |
-| **RemoteSession** | 高层 Python API。标签管理通过 WS 走 `chrome.tabs` API。JS 执行分两路：`world="isolated"` 走 content.js eval（受 CSP 限制），`world="main"` 走 `<script src="/exec/{execId}">` 注入 MAIN world（绕过 CSP）|
+| **TabSession** | 基础设施层。server 生命周期 + 标签管理 + pyautogui 设备输入 + RemoteSession 代理（自动注入 chromeTabId）。PageObject 和 Flow 不直接持有 chromeTabId |
+| **PageObject** | 页面模型层。管理选择器 + 页面操作方法（不包含控制流）。组合 TabSession |
+| **Flow** | 业务流程层。编排循环、条件、异常处理（不出现选择器）。组合 PageObject |
+
+Python 侧三层关系：
+
+```
+TabSession  ← 组合 — PageObject  ← 组合 — Flow
+```
 
 ## 端点
 
@@ -92,7 +109,41 @@ uv run python main.py   # 启动服务 + 标签监控
 }
 ```
 
-## RemoteSession API
+## TabSession API（推荐）
+
+```python
+from server import TabSession
+
+async with TabSession() as session:
+    # 打开/连接标签
+    await session.ensure_tab("https://www.zhipin.com/web/geek/jobs")
+
+    # 标签管理
+    await session.activate()          # 窗口置前 + 聚焦
+    await session.refresh_tab()       # 当前标签失效时取最新
+    await session.close()
+
+    # 设备输入（pyautogui）
+    await session.click(x, y)                                # 激活 + 鼠标点击
+    await session.scroll_pagedown(at_x=x, at_y=y, presses=3) # 激活 + 移动 + PageDown
+
+    # 远程操作（自动注入当前 chromeTabId）
+    result = await session.execute("return document.title", world="isolated")
+    result = await session.execute("return window._PAGE", world="main")
+    data = await session.query("li.job-card-box", project={"title": ".job-name@text"}, return_="list")
+    bbox = await session.bbox("a.op-btn-chat")
+
+    # 事件订阅
+    def on_exec(msg):
+        print(f"结果: {msg.get('data')}")
+    session.on("execution_result", on_exec)
+
+    # 逃生口：访问原始 RemoteSession
+    raw = session.remote_session
+    tabs = await raw.list_tabs()
+```
+
+## RemoteSession API（底层，一般通过 TabSession 代理调用）
 
 ```python
 from server import TabRegistry, RemoteSession
@@ -113,12 +164,6 @@ tab = await session.open_tab("https://www.zhipin.com/")
 
 # 执行 JS（world="main" 通过 /exec/{execId} 绕过 CSP）
 result = await session.execute(tab["uuid"], "document.title", timeout=30.0)
-
-# 执行 JS（world="isolated" 走 content.js eval，受 CSP 限制）
-result = await session.execute(tab["uuid"], "document.title", world="isolated", timeout=30.0)
-
-# 执行 JS（world="main" 注入 MAIN world，绕过 CSP，可访问 window.* 等）
-result = await session.execute(tab["uuid"], "return window._PAGE", world="main", timeout=30.0)
 
 # 获取元素屏幕坐标（CSS 像素 + DPI 缩放物理像素）
 coords = await session.get_element_coordinates(tab["uuid"], ".job-name")
@@ -197,4 +242,6 @@ async def main():
 - 标签管理走 `chrome.tabs` API（通过 ext WS），JS 执行和坐标走 content script（通过 tab WS）
 - HTTP 端点 `/exec/{execId}` 仅对内网 localhost 开放，用于 MAIN world 代码注入
 - Python API 直接在进程内调用 `RemoteSession`，不走网络
+- 三层架构：TabSession（基础设施）← 组合 — PageObject（页面模型）← 组合 — Flow（业务流程）
+- PageObject 不包含控制流（循环/条件），Flow 不出现选择器字符串
 - 不保留向后兼容的模块级全局状态

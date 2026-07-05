@@ -74,9 +74,7 @@ class BossJobListPage:
         return res
 
     async def has_no_more(self) -> bool:
-        text = await self.session.execute(
-            "return document.body.innerText", world="main",
-        )
+        text = await self.session.execute("return document.body.innerText")
         return "没有更多了" in (text or "")
 
     # ── 交互坐标 ──────────────────────────────────────
