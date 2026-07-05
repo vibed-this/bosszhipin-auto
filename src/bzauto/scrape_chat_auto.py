@@ -45,7 +45,7 @@ class BossChatAuto:
         self._port = port
         self.session = session or TabSession()
         self.page = BossChatListPage(self.session)
-        self.flow = BossScrapeChatFlow(self.page)
+        self.flow = BossScrapeChatFlow(self.page, self.session)
 
     async def run(
         self,

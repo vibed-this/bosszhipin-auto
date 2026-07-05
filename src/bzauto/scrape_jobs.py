@@ -45,7 +45,7 @@ class BossJobsAuto:
         self._port = port
         self.session = session or TabSession()
         self.page = BossJobListPage(self.session)
-        self.flow = BossScrapeFlow(self.page)
+        self.flow = BossScrapeFlow(self.page, self.session)
 
     async def run(
         self,

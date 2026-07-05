@@ -98,7 +98,7 @@ class BzAutoApp:
             session = TabSession()
             try:
                 page = BossChatListPage(session)
-                flow = BossScrapeChatFlow(page)
+                flow = BossScrapeChatFlow(page, session)
                 out_file = output_dir / f"chat_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"
                 data = await flow.run(max_scrolls=0, output=out_file)
                 log.info("聊天爬取完成: %d 条记录 -> %s", len(data), out_file)

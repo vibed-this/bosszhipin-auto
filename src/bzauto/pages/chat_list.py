@@ -95,7 +95,7 @@ class BossChatListPage:
         return count > 0
 
     async def is_chat_page(self) -> bool:
-        tabs = self._session._registry.tabs
+        tabs = self._session.registry.tabs
         for tab in tabs:
             url = tab.get("url", "")
             if "zhipin.com" in url and "chat" in url:

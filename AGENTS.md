@@ -14,21 +14,41 @@ Chrome 扩展 + Python 服务，远程控制 Boss直聘页面，支持 JS 远程
 │       ├── __main__.py          # python -m bzauto 启动服务
 │       ├── analyze.py           # PageAnalyzer — 使用 TabSession 的页面分析工具
 │       ├── scrape_jobs.py       # BossJobsAuto — 组合 TabSession + BossJobListPage + BossScrapeFlow 的入口
+│       ├── protocol/
+│       │   ├── __init__.py
+│       │   └── types.py         # TypedDict 定义（与 TS 协议对齐）
 │       ├── server/
 │       │   ├── __init__.py      # 导出 TabRegistry, RemoteSession, TabSession, create_app, run_server
-│       │   ├── registry.py      # TabRegistry — 标签状态、WS连接、执行 Futures、chromeTabId 映射
-│       │   ├── api.py           # RemoteSession — Python API (open/close/list/execute/coordinates/activate/reload)
-│       │   ├── session.py       # TabSession — 基础设施层：服务器生命周期 + 标签管理 + 设备输入 + RemoteSession 代理
-│       │   └── app.py           # FastAPI app factory — WS 端点 `/api/ws` + `/exec/{execId}` HTTP 端点
+│       │   ├── registry.py      # TabRegistry — 标签状态、Socket.IO 服务器、执行 store、chromeTabId 映射
+│       │   ├── remote_session.py # RemoteSession — Python API (sio.call RPC)
+│       │   ├── tab_session.py   # TabSession — 基础设施层：服务器生命周期 + 标签管理 + 设备输入 + RemoteSession 代理
+│       │   ├── session.py       # 向后兼容导入
+│       │   ├── app.py           # Socket.IO ASGIApp + FastAPI — `/exec/{execId}` HTTP 端点
+│       │   └── lifecycle.py     # 进程级单例
 │       ├── pages/
 │       │   ├── __init__.py
-│       │   └── job_list.py      # BossJobListPage — 职位列表页面对象（选择器 + 操作方法）
+│       │   ├── job_list.py      # BossJobListPage — 职位列表页面对象（选择器 + 操作方法）
+│       │   └── chat_list.py     # BossChatListPage — 聊天列表页面对象
 │       └── flows/
 │           ├── __init__.py
-│           └── scrape.py        # BossScrapeFlow — 爬取 + 沟通流程编排
-├── extension/
-│   ├── manifest.json    # Chrome Extension MV3 清单
-│   └── background.js    # Service Worker — WS ext 连接、tab 管理 (chrome.tabs API)
+│           ├── scrape.py        # BossScrapeFlow — 爬取 + 沟通流程编排
+│           └── scrape_chat.py   # BossScrapeChatFlow — 聊天列表爬取流程编排
+├── extension/                   # CRXJS + TypeScript 前端项目
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── vite.config.ts
+│   ├── manifest.json            # Chrome Extension MV3 清单（指向 TS）
+│   ├── src/
+│   │   ├── background/
+│   │   │   ├── index.ts         # SW 入口
+│   │   │   ├── socket.ts        # Socket.IO client 封装
+│   │   │   ├── tab-manager.ts   # chrome.tabs 事件监听
+│   │   │   ├── handlers.ts      # 服务端 RPC 命令处理器
+│   │   │   ├── execute.ts       # MAIN world 注入逻辑
+│   │   │   └── query-engine.ts  # 声明式 DOM 查询引擎
+│   │   └── protocol/
+│   │       └── types.ts         # 全部消息/事件类型定义
+│   └── dist/                    # 构建产物（Chrome 加载此目录）
 ├── scripts/
 │   └── bosszhipin-remote.user.js  # (旧) 油猴脚本，推荐使用扩展替代
 ├── pyproject.toml
@@ -51,7 +71,7 @@ boss-scrape              # 抓取 CLI
 
 1. 浏览器打开 `chrome://extensions`
 2. 打开 **开发者模式**
-3. 点击 **加载已解压的扩展程序**，选择 `extension/` 目录
+3. 点击 **加载已解压的扩展程序**，选择 `extension/dist/` 目录
 
 ## 扩展权限更新
 
@@ -61,9 +81,9 @@ boss-scrape              # 抓取 CLI
 
 | 层 | 说明 |
 |---|---|
-| **Chrome 扩展** | MV3。一条 WS 通道 `/api/ws`（background.js 连接，处理所有操作）。background.js 自动连接 WS，开机/安装时启动 |
-| **background.js** | Service Worker。连接 `/api/ws`，处理 `open_tab` / `close_tab` / `activate_tab` / `reload_tab` / `list_tabs` / `execute` / `query`。自动重连 + ping keepalive |
-| **Python 服务** | FastAPI + WebSocket。`/api/ws` 接收 background.js 连接。`/exec/{execId}` HTTP 端点用于 MAIN world 代码注入（绕过 CSP）。所有 Python API 通过 `RemoteSession` 调用 |
+| **Chrome 扩展** | MV3。一条 Socket.IO 通道（background.js 连接，处理所有操作）。background.js 自动连接，开机/安装时启动 |
+| **background.js** | Service Worker。连接 Socket.IO 服务器，处理 `open_tab` / `close_tab` / `activate_tab` / `reload_tab` / `list_tabs` / `execute` / `query`。自动重连 + engine.io ping/pong 保活 |
+| **Python 服务** | FastAPI + Socket.IO。`/socket.io/` 端点接收 background.js 连接。`/exec/{execId}` HTTP 端点用于 MAIN world 代码注入（绕过 CSP）。所有 Python API 通过 `RemoteSession` 调用 |
 | **TabSession** | 基础设施层。server 生命周期 + 标签管理 + pyautogui 设备输入 + RemoteSession 代理（自动注入 chromeTabId）。PageObject 和 Flow 不直接持有 chromeTabId |
 | **PageObject** | 页面模型层。管理选择器 + 页面操作方法（不包含控制流）。组合 TabSession |
 | **Flow** | 业务流程层。编排循环、条件、异常处理（不出现选择器）。组合 PageObject |
@@ -78,12 +98,12 @@ TabSession  ← 组合 — PageObject  ← 组合 — Flow
 
 | 端点 | 客户端 | 用途 |
 |---|---|---|
-| `/api/ws` | background.js | 扩展后台命令（标签管理、JS 执行、DOM 查询） |
+| `/socket.io/` | background.js | 扩展后台命令（标签管理、JS 执行、DOM 查询） |
 | `/exec/{execId}` | `<script>` 标签（页面 MAIN world） | HTTP GET，返回 JS 代码，注入到页面主 world |
 
 ## 消息协议
 
-### `/api/ws`（background.js）
+### `/socket.io/`（background.js）
 
 服务 → 扩展：
 - `open_tab(id, url)` — 创建标签
@@ -94,7 +114,7 @@ TabSession  ← 组合 — PageObject  ← 组合 — Flow
 - `execute(id, chromeTabId, execId)` — 执行 JS（通过 `<script>` 注入 MAIN world，绕过 CSP）
 - `query(id, chromeTabId, select, filter, project, return)` — 声明式 DOM 查询（`chrome.scripting.executeScript`）
 
-扩展 → 服务：`result(id, data, error)`, `sync_state`, `tab_created`, `tab_updated`, `tab_closed`, `tab_activated`, `ping`
+扩展 → 服务：`sync_state`, `tab_created`, `tab_updated`, `tab_closed`, `tab_activated`
 
 ### 通用
 
@@ -248,5 +268,5 @@ async def main():
 
 ## 调试注意事项
 
-- **不要用 Chrome DevTools MCP** — 此项目通过自身扩展的 WebSocket 连接控制浏览器，DevTools 协议无法连接
+- **不要用 Chrome DevTools MCP** — 此项目通过自身扩展的 Socket.IO 连接控制浏览器，DevTools 协议无法连接
 - **`CancelledError` 是正常的** — uvicorn 内部在 WebSocket 连接关闭时会打印 `asyncio.CancelledError`，这是 asyncio 的正常行为，不影响功能

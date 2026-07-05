@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import uuid
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from starlette.websockets import WebSocket
+import socketio
 
 logger = logging.getLogger("boss.registry")
 
@@ -26,14 +23,52 @@ class ElementNotFound(LookupError):
 
 
 class TabRegistry:
-    """Shared state: tab metadata (from bg events), WS connection, pending futures."""
+    """Shared state: tab metadata (from bg events), Socket.IO server, exec store."""
 
     def __init__(self) -> None:
-        self._ws: WebSocket | None = None
+        self.sio = socketio.AsyncServer(
+            async_mode="asgi",
+            cors_allowed_origins="*",
+            ping_interval=20,
+            ping_timeout=25,
+        )
+        self._sid: str | None = None
         self._tabs: dict[int, dict[str, Any]] = {}
-        self._pending: dict[str, asyncio.Future] = {}
         self._event_handlers: dict[str, list[Callable]] = {}
         self._exec_store: dict[str, str] = {}
+        self._register_sio_events()
+
+    def _register_sio_events(self) -> None:
+        @self.sio.event
+        async def connect(sid, environ):
+            logger.info("扩展后台已连接: sid=%s", sid[:8])
+            self._sid = sid
+
+        @self.sio.event
+        async def disconnect(sid):
+            logger.info("扩展后台已断开: sid=%s", sid[:8])
+            if self._sid == sid:
+                self._sid = None
+
+        @self.sio.on("sync_state")
+        async def on_sync_state(sid, data):
+            self.handle_tab_event({"type": "sync_state", **data})
+
+        @self.sio.on("tab_created")
+        async def on_tab_created(sid, data):
+            self.handle_tab_event({"type": "tab_created", **data})
+
+        @self.sio.on("tab_updated")
+        async def on_tab_updated(sid, data):
+            self.handle_tab_event({"type": "tab_updated", **data})
+
+        @self.sio.on("tab_closed")
+        async def on_tab_closed(sid, data):
+            self.handle_tab_event({"type": "tab_closed", **data})
+
+        @self.sio.on("tab_activated")
+        async def on_tab_activated(sid, data):
+            self.handle_tab_event({"type": "tab_activated", **data})
 
     def on(self, event: str, callback: Callable) -> None:
         logger.debug("注册事件监听: event=%s", event)
@@ -67,66 +102,24 @@ class TabRegistry:
             except Exception as e:
                 logger.error("事件回调异常 (%s): %s", event_type, e)
 
-    def set_ws(self, ws: WebSocket) -> None:
-        logger.debug("设置 WebSocket 连接")
-        self._ws = ws
-
-    def remove_ws(self, ws: WebSocket | None = None) -> None:
-        """移除 WebSocket 连接。若传入 ws，仅在匹配时才清除。"""
-        if ws is None or self._ws is ws:
-            logger.debug("移除 WebSocket 连接")
-            self._ws = None
-        else:
-            logger.debug("跳过移除: 传入的 ws 已不是当前连接")
-
     def is_connected(self) -> bool:
-        connected = self._ws is not None
+        connected = self._sid is not None
         logger.debug("检查连接状态: %s", connected)
         return connected
 
-    async def send(
-        self,
-        msg_type: str,
-        timeout: float = 10.0,
-        **extra: Any,
-    ) -> Any:
-        ws = self._ws
-        if ws is None:
+    async def call(self, event: str, data: dict, timeout: float = 10.0) -> Any:
+        if self._sid is None:
             raise ConnectionError("扩展后台未连接")
-
-        cmd_id = str(uuid.uuid4())
-        loop = asyncio.get_running_loop()
-        fut = loop.create_future()
-        self._pending[cmd_id] = fut
-
-        payload = {"type": msg_type, "id": cmd_id, **extra}
-        payload_str = json.dumps(payload)
-        logger.debug(">> 发送命令: type=%s id=%s timeout=%s", msg_type, cmd_id, timeout)
-        logger.debug(">> 命令内容: %s", payload_str[:500] if len(payload_str) > 500 else payload_str)
-        await ws.send_text(payload_str)
-
         try:
-            result = await asyncio.wait_for(fut, timeout=timeout)
+            result = await self.sio.call(event, data, to=self._sid, timeout=timeout)
+            if isinstance(result, dict) and "error" in result:
+                raise Exception(result["error"])
             result_str = str(result) if result else "None"
-            logger.debug("<< 命令完成: id=%s result=%s", cmd_id, result_str[:200] if len(result_str) > 200 else result_str)
+            logger.debug("<< 命令完成: event=%s result=%s", event, result_str[:200] if len(result_str) > 200 else result_str)
             return result
-        except asyncio.TimeoutError:
-            self._pending.pop(cmd_id, None)
-            logger.debug("!! 命令超时: id=%s type=%s timeout=%s", cmd_id, msg_type, timeout)
-            raise TimeoutError(f"{msg_type} 超时 ({timeout}s)") from None
-
-    def resolve_result(self, cmd_id: str, data: Any, error: str | None) -> None:
-        fut = self._pending.pop(cmd_id, None)
-        if fut is not None and not fut.done():
-            if error:
-                logger.debug("解析结果(错误): cmd_id=%s error=%s", cmd_id, error)
-                fut.set_exception(Exception(error))
-            else:
-                data_str = str(data) if data else "None"
-                logger.debug("解析结果(成功): cmd_id=%s data=%s", cmd_id, data_str[:100] if len(data_str) > 100 else data_str)
-                fut.set_result(data)
-        else:
-            logger.debug("解析结果(忽略): cmd_id=%s (Future不存在或已完成)", cmd_id)
+        except socketio.exceptions.TimeoutError:
+            logger.debug("!! 命令超时: event=%s timeout=%s", event, timeout)
+            raise TimeoutError(f"{event} 超时 ({timeout}s)") from None
 
     def handle_tab_event(self, msg: dict) -> None:
         t = msg.get("type")
@@ -233,9 +226,6 @@ class TabRegistry:
 
     async def close_all(self) -> None:
         self._exec_store.clear()
-        if self._ws is not None:
-            try:
-                await self._ws.close()
-            except Exception:
-                pass
-            self._ws = None
+        if self._sid is not None:
+            # 连接将由 Socket.IO 自动管理
+            self._sid = None

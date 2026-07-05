@@ -37,7 +37,7 @@ async def start_server(host: str = "127.0.0.1", port: int = 8765) -> None:
     config = uvicorn.Config(app, host=host, port=port, log_level="warning")
     _server = uvicorn.Server(config)
     _server_task = asyncio.create_task(_server.serve())
-    log.info("服务器已启动: ws://%s:%s/api/ws", host, port)
+    log.info("服务器已启动: http://%s:%s/socket.io/", host, port)
 
 
 async def stop_server() -> None:

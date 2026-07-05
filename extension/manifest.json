@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Boss直聘远程控制",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "远程控制Boss直聘页面，支持JS执行、元素坐标查询",
+  "minimum_chrome_version": "116",
   "permissions": [
     "storage",
     "tabs",
@@ -11,9 +12,11 @@
   "host_permissions": [
     "https://*.zhipin.com/*",
     "https://*.bosszhipin.com/*",
+    "http://127.0.0.1/*",
     "ws://127.0.0.1/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "src/background/index.ts",
+    "type": "module"
   }
 }

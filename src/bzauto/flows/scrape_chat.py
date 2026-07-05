@@ -5,9 +5,12 @@ import json
 import logging
 import random
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from bzauto.pages.chat_list import BossChatListPage
+
+if TYPE_CHECKING:
+    from bzauto.server.tab_session import TabSession
 
 log = logging.getLogger("flow.scrape_chat")
 
@@ -15,8 +18,9 @@ log = logging.getLogger("flow.scrape_chat")
 class BossScrapeChatFlow:
     """聊天列表爬取流程编排。"""
 
-    def __init__(self, page: BossChatListPage) -> None:
+    def __init__(self, page: BossChatListPage, session: "TabSession") -> None:
         self._page = page
+        self._session = session
 
     async def run(
         self,
@@ -25,7 +29,7 @@ class BossScrapeChatFlow:
         max_scrolls: int = 0,
         output: str | Path | None = None,
     ) -> list[dict[str, Any]]:
-        session = self._page._session
+        session = self._session
 
         from bzauto.server.lifecycle import ensure_tab
         await ensure_tab(session, url or 'https://www.zhipin.com/web/geek/chat')
