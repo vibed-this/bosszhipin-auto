@@ -96,3 +96,17 @@ class ControlPanel(QWidget):
 
         self.adjustSize()
         self.setFixedSize(self.width(), self.height())
+
+        # 所有任务按钮（退出除外），用于任务执行时禁用/启用
+        self.task_buttons = [
+            self.btn_chat,
+            self.btn_scrape_chat,
+            self.btn_dump,
+            self.btn_batch,
+            self.btn_urge,
+        ]
+
+    def set_buttons_enabled(self, enabled: bool) -> None:
+        """启用/禁用所有任务按钮。"""
+        for btn in self.task_buttons:
+            btn.setEnabled(enabled)

@@ -98,7 +98,7 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
         except Exception as e:
             logger.error("[!] 扩展WS异常: %s", e)
         finally:
-            registry.remove_ws()
+            registry.remove_ws(ws)
 
     return app
 

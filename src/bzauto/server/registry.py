@@ -71,9 +71,13 @@ class TabRegistry:
         logger.debug("设置 WebSocket 连接")
         self._ws = ws
 
-    def remove_ws(self) -> None:
-        logger.debug("移除 WebSocket 连接")
-        self._ws = None
+    def remove_ws(self, ws: WebSocket | None = None) -> None:
+        """移除 WebSocket 连接。若传入 ws，仅在匹配时才清除。"""
+        if ws is None or self._ws is ws:
+            logger.debug("移除 WebSocket 连接")
+            self._ws = None
+        else:
+            logger.debug("跳过移除: 传入的 ws 已不是当前连接")
 
     def is_connected(self) -> bool:
         connected = self._ws is not None
