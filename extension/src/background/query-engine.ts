@@ -165,8 +165,8 @@ export function queryEngine(args: QueryArgs): QueryResult {
         break;
       case 'raw':
         data = matched.map((el) => ({
-          text: (el.textContent || '').trim().slice(0, 200),
-          html: el.outerHTML.slice(0, 500),
+          text: (el.textContent || '').trim(),
+          html: el.outerHTML,
         }));
         break;
       default:

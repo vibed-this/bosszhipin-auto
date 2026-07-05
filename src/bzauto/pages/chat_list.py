@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 from bzauto.server.session import TabSession
@@ -50,39 +49,28 @@ class BossChatListPage:
     async def get_chat_items_with_status(self) -> list[dict[str, Any]]:
         raw = await self._session.query(
             select=_LIST_ITEM,
-            return_="raw",
+            project={
+                "name": f"{_NAME}@text",
+                "company": f"{_NAME_BOX} span:nth-child(2)@text",
+                "position": f"{_NAME_BOX} span:nth-child(4)@text",
+                "time": f"{_TIME}@text",
+                "lastMsg": f"{_MSG}@text",
+                "statusClass": f"{_STATUS}@class",
+            },
+            return_="list",
         )
         if not raw:
             return []
-
-        results = []
         for item in raw:
-            html = item.get("html", "")
-            name = re.search(r'class="name-text">(.*?)</span>', html)
-            spans = re.findall(
-                r'<span>(.*?)</span>',
-                html.split("name-box")[1].split("last-msg")[0],
-            ) if "name-box" in html else []
-            time_m = re.search(r'class="time">(.*?)</span>', html)
-            msg = re.search(r'class="last-msg-text">(.*?)</span>', html)
-            status_m = re.search(
-                r'class="message-status\s+(status-[^"]+)"', html
-            )
-
-            status = ""
-            if status_m:
-                s = status_m.group(1)
-                status = "已读" if "read" in s else "送达" if "delivery" in s else ""
-
-            results.append({
-                "name": name.group(1) if name else "",
-                "company": spans[0] if len(spans) > 0 else "",
-                "position": spans[1] if len(spans) > 1 else "",
-                "time": time_m.group(1) if time_m else "",
-                "status": status,
-                "lastMsg": msg.group(1).strip()[:200] if msg else "",
-            })
-        return results
+            cls = item.get("statusClass") or ""
+            if "read" in cls:
+                item["status"] = "已读"
+            elif "delivery" in cls:
+                item["status"] = "送达"
+            else:
+                item["status"] = ""
+            item.pop("statusClass", None)
+        return raw
 
     async def get_chat_item_count(self) -> int:
         result = await self._session.query(
