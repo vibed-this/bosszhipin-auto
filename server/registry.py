@@ -33,6 +33,7 @@ class TabRegistry:
         self._tabs: dict[int, dict[str, Any]] = {}
         self._pending: dict[str, asyncio.Future] = {}
         self._event_handlers: dict[str, list[Callable]] = {}
+        self._exec_store: dict[str, str] = {}
 
     # ── event subscription ───────────────────────────────────────
 
@@ -219,6 +220,7 @@ class TabRegistry:
     # ── cleanup ──────────────────────────────────────────────────
 
     async def close_all(self) -> None:
+        self._exec_store.clear()
         if self._ws is not None:
             try:
                 await self._ws.close()

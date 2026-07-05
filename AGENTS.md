@@ -12,7 +12,7 @@ Chrome 扩展 + Python 服务，远程控制 Boss直聘页面，支持 JS 远程
 │   ├── __init__.py      # 导出 TabRegistry, RemoteSession, create_app, run_server
 │   ├── registry.py      # TabRegistry — 标签状态、WS连接、执行 Futures、chromeTabId 映射
 │   ├── api.py           # RemoteSession — Python API (open/close/list/execute/coordinates/activate/reload)
-│   └── main.py          # FastAPI app factory — WS 端点 + `/exec/{cmd_id}` HTTP 端点用于绕过 CSP
+│   └── main.py          # FastAPI app factory — WS 端点 `/api/ws` + `/exec/{execId}` HTTP 端点用于 MAIN world 执行
 ├── extension/
 │   ├── manifest.json    # Chrome Extension MV3 清单
 │   ├── content.js       # 内容脚本 — WS 连接、JS 执行、元素坐标计算
@@ -48,49 +48,41 @@ uv run python main.py   # 启动服务 + 标签监控
 
 | 层 | 说明 |
 |---|---|
-| **Chrome 扩展** | MV3。两条 WS 通道：`/api/ws/tab`（content script 执行 JS/坐标）、`/api/ws/ext`（background.js 管理标签生命周期）。background.js 自动连接 WS，开机/安装时启动 |
-| **content.js** | 运行在 `*.zhipin.com/*` + `*.bosszhipin.com/*`。生成 UUID，连接 `/api/ws/tab`，处理 `execute` / `get_coordinates` / `close`。加载时通过 `chrome.runtime.sendMessage` 向 background 上报 UUID |
-| **background.js** | Service Worker。连接 `/api/ws/ext`，处理 `open_tab` / `close_tab` / `activate_tab` / `reload_tab` / `list_tabs`。自动重连 + ping keepalive |
-| **Python 服务** | FastAPI + WebSocket。`/api/ws/tab` 接收 content script 连接，`/api/ws/ext` 接收 background.js 连接，`/api/ws/control` 供外部监控。`/exec/{cmd_id}` 绕过 CSP。所有 Python API 通过 `RemoteSession` 调用 |
-| **RemoteSession** | 高层 Python API。标签管理（`open_tab` / `close_tab` / `activate_tab` / `reload_tab` / `list_tabs`）通过 ext WS 走 `chrome.tabs` API。JS 执行和坐标查询通过 tab WS 走 content script |
+| **Chrome 扩展** | MV3。一条 WS 通道 `/api/ws`（background.js 连接，处理所有操作）。background.js 自动连接 WS，开机/安装时启动 |
+| **content.js** | 运行在 `*.zhipin.com/*` + `*.bosszhipin.com/*`。处理 background.js 发来的 `execute` 消息（content script eval）、监听 `window.postMessage` 回传结果 |
+| **background.js** | Service Worker。连接 `/api/ws`，处理 `open_tab` / `close_tab` / `activate_tab` / `reload_tab` / `list_tabs` / `execute` / `query`。自动重连 + ping keepalive |
+| **Python 服务** | FastAPI + WebSocket。`/api/ws` 接收 background.js 连接。`/exec/{execId}` HTTP 端点用于 MAIN world 代码注入（绕过 CSP）。所有 Python API 通过 `RemoteSession` 调用 |
+| **RemoteSession** | 高层 Python API。标签管理通过 WS 走 `chrome.tabs` API。JS 执行分两路：`world="isolated"` 走 content.js eval（受 CSP 限制），`world="main"` 走 `<script src="/exec/{execId}">` 注入 MAIN world（绕过 CSP）|
 
-## WebSocket 端点
+## 端点
 
 | 端点 | 客户端 | 用途 |
 |---|---|---|
-| `/api/ws/tab` | content.js | 注册标签、执行 JS、坐标查询 |
-| `/api/ws/ext` | background.js | 扩展后台命令（标签管理） |
-| `/api/ws/control` | 外部工具/监控 | 状态查看、转发命令 |
+| `/api/ws` | background.js | 扩展后台命令（标签管理、JS 执行、DOM 查询） |
+| `/exec/{execId}` | `<script>` 标签（页面 MAIN world） | HTTP GET，返回 JS 代码，注入到页面主 world |
 
 ## 消息协议
 
-### `/api/ws/tab`（content script）
-
-扩展 → 服务：`register`, `unregister`, `result`, `ping`
-服务 → 扩展：`execute(id, context, code)`, `get_coordinates(id, selector)`, `close`, `registered`
-
-### `/api/ws/ext`（background.js）
+### `/api/ws`（background.js）
 
 服务 → 扩展：
-- `open_tab(id, url)` — 创建标签，等待 content script 就绪后返回 `{chromeTabId, uuid, url, title}`
+- `open_tab(id, url)` — 创建标签
 - `close_tab(id, chromeTabId)` — 关闭标签
 - `activate_tab(id, chromeTabId)` — 激活标签窗口
-- `reload_tab(id, chromeTabId)` — 刷新标签，等待重新就绪后返回 `{uuid, url, title}`
-- `list_tabs(id)` — 返回所有标签 `[{chromeTabId, url, title, active, windowId}]`
+- `reload_tab(id, chromeTabId)` — 刷新标签
+- `list_tabs(id)` — 返回所有标签
+- `execute(id, chromeTabId, code, world)` — 执行 JS（`world="isolated"` 走 content.js eval，`world="main"` 走 `<script>` 注入）
+- `query(id, chromeTabId, select, filter, project, return)` — 声明式 DOM 查询（`chrome.scripting.executeScript`）
 
-扩展 → 服务（unsolicited）：
-- `content_ready(chromeTabId, uuid, url, title)` — content script 就绪上报，建立 chromeTabId ↔ UUID 映射
-
-### `/api/ws/control`
-
-控制端 → 服务：`execute(tabId, code, context?)`, `get_coordinates(tabId, selector)`
-服务 → 控制端：`result(id, tabId, data, error)`, `error(message)`, `state(tabs)`
+扩展 → 服务：`result(id, data, error)`, `sync_state`, `tab_created`, `tab_updated`, `tab_closed`, `tab_activated`, `ping`
 
 ### 通用
 
-所有请求通过 `id` 关联请求与结果。`execute` 的 `context` 参数：`"page"`（通过 `<script>` 加载 `/exec/{id}` 绕过 CSP，默认）或 `"gm"`（content script 直接 eval）。
+`execute` 的 `world` 参数：
+- `"isolated"`（默认）— 通过 `chrome.tabs.sendMessage` → content.js `eval()`，**受 CSP 限制**，无法访问页面 JS 变量
+- `"main"` — 注入 `<script src="/exec/{execId}">` 到 MAIN world，**绕过 CSP**，可访问 `window.*`、jQuery、React state等页面 JS 变量
 
-`get_coordinates` 返回：
+`get_coordinates` / `bbox` 返回：
 ```json
 {
   "css": { "x": 100, "y": 200 },
@@ -119,8 +111,14 @@ registry.on("execution_result", lambda m: print(f"执行结果: {m.get('data')}"
 tab = await session.open_tab("https://www.zhipin.com/")
 # tab == {chromeTabId: 42, uuid: "xxx-yyy", url: "...", title: "..."}
 
-# 执行 JS（context="page" 通过 /exec/{id} 绕过 CSP; context="gm" 直接 eval）
+# 执行 JS（world="main" 通过 /exec/{execId} 绕过 CSP）
 result = await session.execute(tab["uuid"], "document.title", timeout=30.0)
+
+# 执行 JS（world="isolated" 走 content.js eval，受 CSP 限制）
+result = await session.execute(tab["uuid"], "document.title", world="isolated", timeout=30.0)
+
+# 执行 JS（world="main" 注入 MAIN world，绕过 CSP，可访问 window.* 等）
+result = await session.execute(tab["uuid"], "return window._PAGE", world="main", timeout=30.0)
 
 # 获取元素屏幕坐标（CSS 像素 + DPI 缩放物理像素）
 coords = await session.get_element_coordinates(tab["uuid"], ".job-name")
@@ -197,6 +195,6 @@ async def main():
 - 不使用 Playwright / Selenium 等浏览器自动化库
 - 禁止使用 chrome-devtools-mcp（此项目通过自身 Chrome 扩展 + WS 协议控制浏览器，不使用 DevTools 协议）
 - 标签管理走 `chrome.tabs` API（通过 ext WS），JS 执行和坐标走 content script（通过 tab WS）
-- 服务器只有 WebSocket 端点，不暴露任何 HTTP REST API
+- HTTP 端点 `/exec/{execId}` 仅对内网 localhost 开放，用于 MAIN world 代码注入
 - Python API 直接在进程内调用 `RemoteSession`，不走网络
 - 不保留向后兼容的模块级全局状态

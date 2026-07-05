@@ -6,6 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import Response
 import uvicorn
 
 from server.registry import TabRegistry
@@ -30,6 +31,13 @@ def create_app(registry: TabRegistry | None = None) -> FastAPI:
         await registry.close_all()
 
     app = FastAPI(title="Boss直聘远程控制", lifespan=lifespan)
+
+    @app.get("/exec/{exec_id}")
+    async def exec_script(exec_id: str):
+        code = registry._exec_store.pop(exec_id, None)
+        if code is None:
+            return Response(status_code=404)
+        return Response(content=code, media_type="application/javascript")
 
     @app.websocket("/api/ws")
     async def bg_websocket(ws: WebSocket):

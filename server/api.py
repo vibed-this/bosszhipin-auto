@@ -17,7 +17,9 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -129,7 +131,7 @@ class RemoteSession:
         world: str = "isolated",
         timeout: float = 30.0,
     ) -> Any:
-        """Execute JavaScript on a tab via ``chrome.scripting.executeScript``.
+        """Execute JavaScript on a tab.
 
         Parameters
         ----------
@@ -138,11 +140,28 @@ class RemoteSession:
         code :
             JavaScript source code.
         world :
-            ``"isolated"`` (default, eval works regardless of page CSP) or
-            ``"main"`` (subject to page CSP).
+            ``"isolated"`` — via content.js ``eval()`` (may fail on CSP pages).
+            ``"main"`` — inject ``<script src="/exec/{execId}">``, bypass CSP,
+            can access page JS variables.
         timeout :
             Max seconds to wait for a result.
         """
+        if world == "main":
+            exec_id = str(uuid.uuid4())
+            wrapped = (
+                f'(async function(){{\n'
+                f'{code}\n'
+                f'}})().then(function(r){{\n'
+                f'  window.postMessage({{type:"boss_exec_result",id:"{exec_id}",data:JSON.parse(JSON.stringify(r!==undefined?r:null))}},"*");\n'
+                f'}},function(e){{\n'
+                f'  window.postMessage({{type:"boss_exec_result",id:"{exec_id}",error:e&&e.message?e.message:String(e)}},"*");\n'
+                f'}});'
+            )
+            self._registry._exec_store[exec_id] = wrapped
+            return await self._registry.send(
+                "execute", timeout=timeout,
+                chromeTabId=chrome_tab_id, execId=exec_id, world=world,
+            )
         return await self._registry.send(
             "execute", timeout=timeout,
             chromeTabId=chrome_tab_id, code=code, world=world,

@@ -2,6 +2,7 @@
   "use strict";
 
   const WS_URL = "ws://127.0.0.1:8765/api/ws";
+  const HTTP_BASE = "http://127.0.0.1:8765";
   const RECONNECT_DELAY_MS = 1000;
   const PING_INTERVAL_MS = 15000;
 
@@ -197,7 +198,7 @@
         handleListTabs(msg.id);
         break;
       case "execute":
-        handleExecute(msg.id, msg.chromeTabId, msg.code, msg.world);
+        handleExecute(msg.id, msg.chromeTabId, msg.code, msg.world, msg.execId);
         break;
       case "query":
         handleQuery(msg.id, msg.chromeTabId, msg.select, msg.filter, msg.project, msg["return"]);
@@ -267,17 +268,64 @@
 
   // ── Execute (via content.js CSP-exempt eval) ───────────────
 
-  async function handleExecute(id, chromeTabId, code, world) {
+  async function handleExecute(id, chromeTabId, code, world, execId) {
     try {
-      const resp = await chrome.tabs.sendMessage(chromeTabId, {
-        type: "execute",
-        code: code,
-      });
-      if (resp.error) {
-        sendResult(id, null, resp.error);
+      if (world === "main") {
+        await handleExecuteMain(id, chromeTabId, execId);
       } else {
-        sendResult(id, resp.data, null);
+        const resp = await chrome.tabs.sendMessage(chromeTabId, {
+          type: "execute",
+          code: code,
+        });
+        if (resp.error) {
+          sendResult(id, null, resp.error);
+        } else {
+          sendResult(id, resp.data, null);
+        }
       }
+    } catch (e) {
+      sendResult(id, null, e.message);
+    }
+  }
+
+  // ── Execute: MAIN world (via <script src="/exec/{execId}">) ─
+
+  async function handleExecuteMain(id, chromeTabId, execId) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: chromeTabId },
+        world: "ISOLATED",
+        func: async function (execId, baseUrl) {
+          return await new Promise(function (resolve, reject) {
+            var handler = function (event) {
+              if (event.data && event.data.type === "boss_exec_result" && event.data.id === execId) {
+                window.removeEventListener("message", handler);
+                if (event.data.error) {
+                  reject(new Error(event.data.error));
+                } else {
+                  resolve(event.data.data !== undefined ? event.data.data : null);
+                }
+              }
+            };
+            window.addEventListener("message", handler);
+
+            var s = document.createElement("script");
+            s.src = baseUrl + "/exec/" + execId;
+            s.onerror = function () {
+              window.removeEventListener("message", handler);
+              reject(new Error("Failed to load exec script"));
+            };
+            document.head.appendChild(s);
+
+            setTimeout(function () {
+              window.removeEventListener("message", handler);
+              reject(new Error("Execute timeout (MAIN world)"));
+            }, 30000);
+          });
+        },
+        args: [execId, HTTP_BASE],
+      });
+      sendResult(id, results[0]?.result, null);
     } catch (e) {
       sendResult(id, null, e.message);
     }
