@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import datetime
+import logging
+from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import QTextEdit, QVBoxLayout, QWidget
 
 
 class LogWindow(QWidget):
+    """日志窗口，作为标准 logging.Handler 接入日志体系。"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Boss直聘 - 日志")
@@ -27,34 +30,58 @@ class LogWindow(QWidget):
         self._text.setVerticalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOn
         )
-
         self._text.setStyleSheet("QTextEdit { border: 0px; }")
         layout.addWidget(self._text)
 
-        self._log_file: str | None = None
-
-    def _ensure_log_file(self) -> None:
-        if self._log_file is not None:
-            return
+        # 日志文件 Handler
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
-        now = datetime.datetime.now()
-        self._log_file = str(
-            log_dir / f"{now:%Y-%m-%d-%H-%M-%S}.log"
+        now = datetime.now()
+        self._file_handler = logging.FileHandler(
+            log_dir / f"{now:%Y-%m-%d-%H-%M-%S}.log",
+            encoding="utf-8",
+        )
+        self._file_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         )
 
-    def log(self, text: str) -> None:
-        self._ensure_log_file()
-        line = f"[{datetime.datetime.now():%H:%M:%S}] {text}\n"
+        # 窗口 Handler
+        self._gui_handler = _GuiHandler(self)
+        self._gui_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        )
 
+        # 挂到 root logger
+        root = logging.getLogger()
+        root.addHandler(self._file_handler)
+        root.addHandler(self._gui_handler)
+        root.setLevel(logging.INFO)
+
+    def append(self, text: str) -> None:
+        """向窗口追加一行日志文本。由 _GuiHandler.emit 通过 QTimer 调用。"""
         self._text.moveCursor(QTextCursor.MoveOperation.End)
-        self._text.insertPlainText(line)
+        self._text.insertPlainText(text + "\n")
         scrollbar = self._text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
-        if self._log_file:
-            try:
-                with open(self._log_file, "a", encoding="utf-8") as f:
-                    f.write(line)
-            except OSError:
-                pass
+    def closeEvent(self, event) -> None:
+        root = logging.getLogger()
+        root.removeHandler(self._file_handler)
+        root.removeHandler(self._gui_handler)
+        self._file_handler.close()
+        super().closeEvent(event)
+
+
+class _GuiHandler(logging.Handler):
+    """将 logging 记录通过 QTimer.singleShot 投递到 LogWindow.append。"""
+
+    def __init__(self, window: LogWindow) -> None:
+        super().__init__()
+        self._window = window
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            QTimer.singleShot(0, lambda m=msg: self._window.append(m))
+        except Exception:
+            self.handleError(record)

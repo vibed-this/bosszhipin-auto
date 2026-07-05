@@ -49,6 +49,12 @@ class ControlPanel(QWidget):
         self.btn_chat.setFixedHeight(28)
         layout.addWidget(self.btn_chat)
 
+        # Button: 聊天爬取
+        layout.addSpacing(2)
+        self.btn_scrape_chat = QPushButton("聊天爬取")
+        self.btn_scrape_chat.setFixedHeight(28)
+        layout.addWidget(self.btn_scrape_chat)
+
         # Separator
         layout.addSpacing(4)
         sep = QFrame()
