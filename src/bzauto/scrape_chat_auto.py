@@ -24,6 +24,7 @@ from typing import Any
 import keyboard
 
 from bzauto.server.session import TabSession
+from bzauto.server.lifecycle import get_registry, start_server, stop_server
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 
@@ -33,25 +34,34 @@ log = logging.getLogger("boss.chat")
 class BossChatAuto:
     """Boss直聘聊天列表抓取入口（组合模式）。"""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
-        self.session = TabSession(host, port)
+    def __init__(
+        self,
+        session: TabSession | None = None,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+    ) -> None:
+        self._host = host
+        self._port = port
+        self.session = session or TabSession()
         self.page = BossChatListPage(self.session)
         self.flow = BossScrapeChatFlow(self.page)
 
     async def run(
         self,
+        url: str | None = None,
         *,
         max_scrolls: int = 0,
         output: str | None = None,
     ) -> list[dict[str, Any]]:
-        return await self.flow.run(max_scrolls=max_scrolls, output=output)
+        return await self.flow.run(url, max_scrolls=max_scrolls, output=output)
 
     async def __aenter__(self) -> BossChatAuto:
-        await self.session.start()
+        await start_server(self._host, self._port)
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        await self.session.stop()
+        pass
 
 
 def cli_main() -> None:
@@ -61,8 +71,10 @@ def cli_main() -> None:
     keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
 
     async def _main():
+        url = sys.argv[1] if len(sys.argv) > 1 else "https://www.zhipin.com/web/geek/chat"
+        output = sys.argv[2] if len(sys.argv) > 2 else None
         async with BossChatAuto() as auto:
-            data = await auto.run(max_scrolls=2)
+            data = await auto.run(url, max_scrolls=2, output=output)
             print(f"抓取到 {len(data)} 条聊天记录")
 
     asyncio.run(_main())

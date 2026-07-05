@@ -28,7 +28,8 @@ class BossScrapeFlow:
     ) -> list[dict[str, Any]]:
         session = self._page._session
 
-        await session.ensure_tab(url, reuse_existing=reuse_existing)
+        from bzauto.server.lifecycle import ensure_tab
+        await ensure_tab(session, url, reuse_existing=reuse_existing)
         await session.activate()
 
         log.info("等待页面加载...")

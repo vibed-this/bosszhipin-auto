@@ -2,9 +2,7 @@ import asyncio
 import json
 import logging
 
-import uvicorn
-
-from bzauto.server import TabRegistry, RemoteSession, create_app
+from bzauto.server import get_registry, start_server, TabSession
 
 log = logging.getLogger("main")
 
@@ -42,8 +40,6 @@ def print_execution_result(msg: dict) -> None:
 
 
 async def main() -> None:
-    host, port = "127.0.0.1", 8765
-
     logging.basicConfig(
         level=logging.DEBUG,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -51,23 +47,16 @@ async def main() -> None:
     )
     logging.getLogger("boss").setLevel(logging.DEBUG)
 
-    registry = TabRegistry()
-    session = RemoteSession(registry)
-    app = create_app(registry)
+    session = TabSession()
 
-    registry.on("tab_ready", print_tab_ready)
-    registry.on("tab_changed", print_tab_changed)
-    registry.on("tab_gone", print_tab_gone)
-    registry.on("execution_result", print_execution_result)
+    session.on("tab_ready", print_tab_ready)
+    session.on("tab_changed", print_tab_changed)
+    session.on("tab_gone", print_tab_gone)
+    session.on("execution_result", print_execution_result)
 
-    server = uvicorn.Server(
-        uvicorn.Config(app, host=host, port=port, log_level="info")
-    )
-
-    print(f"服务已启动: ws://{host}:{port}/api/ws")
     print("等待扩展连接...\n")
-
-    await server.serve()
+    await start_server()
+    await asyncio.Event().wait()
 
 
 def cli_main() -> None:

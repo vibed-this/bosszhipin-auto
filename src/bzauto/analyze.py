@@ -6,7 +6,6 @@
 
     async def main():
         async with PageAnalyzer() as pa:
-            await pa.connect()
             await pa.scan("https://www.zhipin.com/")
             await pa.dump("li.job-card-box", limit=2)
             await pa.find_text("留在本页")
@@ -20,6 +19,7 @@ import logging
 import sys
 
 from bzauto.server.session import TabSession
+from bzauto.server.lifecycle import get_registry, start_server, stop_server, ensure_tab
 
 log = logging.getLogger("analyze")
 
@@ -27,22 +27,23 @@ log = logging.getLogger("analyze")
 class PageAnalyzer:
     """页面分析工具。"""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
-        self._session = TabSession(host, port)
+    def __init__(self, session: TabSession | None = None) -> None:
+        self._session = session or TabSession()
 
     async def start(self) -> None:
-        await self._session.start()
+        await start_server()
         log.info("等待扩展连接...")
-        while not self._session._registry.is_connected():
+        registry = self._session.registry
+        while not registry.is_connected():
             await asyncio.sleep(0.5)
         log.info("扩展已连接，等待标签同步...")
-        while not self._session._registry.tabs:
+        while not registry.tabs:
             await asyncio.sleep(0.3)
-        log.info("已同步 %d 个标签", len(self._session._registry.tabs))
-        await self._session.ensure_tab()
+        log.info("已同步 %d 个标签", len(registry.tabs))
+        await ensure_tab(self._session)
 
     async def stop(self) -> None:
-        await self._session.stop()
+        await stop_server()
 
     async def __aenter__(self) -> PageAnalyzer:
         await self.start()
@@ -52,7 +53,7 @@ class PageAnalyzer:
         await self.stop()
 
     async def connect(self, url: str | None = None) -> None:
-        await self._session.ensure_tab(url)
+        await ensure_tab(self._session, url)
 
     async def scan(self, url: str | None = None) -> None:
         await self.connect(url)
@@ -127,7 +128,7 @@ class PageAnalyzer:
                 });
                 return visible;
             })()
-        """, world="main")
+        """)
         if result:
             log.info("可见弹窗 %d 个:", len(result))
             for r in result:

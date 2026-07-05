@@ -15,6 +15,7 @@ from bzauto.ui.log_window import LogWindow
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.server.session import TabSession
+from bzauto.server.lifecycle import get_registry, start_server, ensure_tab
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -61,8 +62,8 @@ def run_ui() -> None:
     output_dir.mkdir(exist_ok=True)
 
     async def _do_scrape_chat():
+        await start_server()
         session = TabSession()
-        await session.start()
         try:
             page = BossChatListPage(session)
             flow = BossScrapeChatFlow(page)
@@ -70,7 +71,7 @@ def run_ui() -> None:
             data = await flow.run(max_scrolls=0, output=out_file)
             log.info("聊天爬取完成: %d 条记录 -> %s", len(data), out_file)
         finally:
-            await session.stop()
+            pass
 
     def on_scrape_chat():
         log.info("开始聊天爬取...")

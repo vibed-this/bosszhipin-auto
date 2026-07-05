@@ -24,6 +24,7 @@ from typing import Any
 import keyboard
 
 from bzauto.server.session import TabSession
+from bzauto.server.lifecycle import get_registry, start_server, stop_server
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.flows.scrape import BossScrapeFlow
 
@@ -33,8 +34,16 @@ log = logging.getLogger("boss.main")
 class BossJobsAuto:
     """Boss直聘自动化入口（组合模式）。"""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
-        self.session = TabSession(host, port)
+    def __init__(
+        self,
+        session: TabSession | None = None,
+        *,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+    ) -> None:
+        self._host = host
+        self._port = port
+        self.session = session or TabSession()
         self.page = BossJobListPage(self.session)
         self.flow = BossScrapeFlow(self.page)
 
@@ -47,11 +56,11 @@ class BossJobsAuto:
         return await self.flow.run(url, max_scrolls=max_scrolls, reuse_existing=reuse_existing)
 
     async def __aenter__(self) -> BossJobsAuto:
-        await self.session.start()
+        await start_server(self._host, self._port)
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        await self.session.stop()
+        pass
 
 
 def cli_main() -> None:
