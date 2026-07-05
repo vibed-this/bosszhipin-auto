@@ -212,6 +212,31 @@ class BossJobListPage:
             yield card, index
             index += 1
 
+    async def iter_filtered_cards(
+        self,
+        *,
+        whitelist: list[str] | None = None,
+        blacklist: list[str] | None = None,
+        max_scrolls: int = 10,
+        scroll_timeout: float = 5.0,
+    ) -> AsyncIterator[tuple[dict[str, Any], int]]:
+        """包装 iter_job_cards，按白名单/黑名单过滤并去重。"""
+        seen: set[tuple[str, str]] = set()
+        async for card, idx in self.iter_job_cards(
+            max_scrolls=max_scrolls,
+            scroll_timeout=scroll_timeout,
+        ):
+            title = (card.get("title") or "").strip().lower()
+            if whitelist and not any(kw in title for kw in whitelist):
+                continue
+            if blacklist and any(kw in title for kw in blacklist):
+                continue
+            key = (card.get("title") or "", card.get("company") or "")
+            if key in seen:
+                continue
+            seen.add(key)
+            yield card, idx
+
     async def get_salary_info(self) -> dict[str, Any] | None:
         texts = await self.get_salary_texts()
         if not texts:
