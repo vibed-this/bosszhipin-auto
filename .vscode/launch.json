@@ -43,6 +43,14 @@
             "justMyCode": true
         },
         {
+            "name": "boss-delete-chat",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "bzauto.flows.delete_chat",
+            "console": "integratedTerminal",
+            "justMyCode": true
+        },
+        {
             "name": "Python: Current File",
             "type": "debugpy",
             "request": "launch",

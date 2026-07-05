@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Any
 
 from bzauto.server.session import TabSession
@@ -22,6 +24,15 @@ _LABEL_LIST = ".label-list li .label-name"
 _SEARCH_INPUT = ".boss-search-input"
 _FOOTER = ".boss-list-footer .finished"
 _CHAT_NO_DATA = ".chat-no-data .no-data-text"
+
+# --- 右侧聊天详情面板 ---
+_MORE_LABEL = ".chat-conversation .ui-dropmenu-label"
+_TOP_INFO = ".top-info-content"
+_DROPDOWN_LIST = ".chat-conversation .ui-dropmenu-list"
+_DROPDOWN_ITEM_SPAN = ".chat-conversation .ui-dropmenu-list li span"
+_DIALOG_WRAPPER = ".boss-dialog__wrapper"
+_DIALOG_CANCEL = ".boss-dialog__button.button-outline"
+_DIALOG_CONFIRM = ".boss-dialog__button:not(.button-outline)"
 
 
 class BossChatListPage:
@@ -55,21 +66,14 @@ class BossChatListPage:
                 "position": f"{_NAME_BOX} span:nth-child(4)@text",
                 "time": f"{_TIME}@text",
                 "lastMsg": f"{_MSG}@text",
-                "statusClass": f"{_STATUS}@class",
+                "status": f"{_STATUS}@text",
             },
             return_="list",
         )
         if not raw:
             return []
         for item in raw:
-            cls = item.get("statusClass") or ""
-            if "read" in cls:
-                item["status"] = "已读"
-            elif "delivery" in cls:
-                item["status"] = "送达"
-            else:
-                item["status"] = ""
-            item.pop("statusClass", None)
+            item["status"] = (item.get("status") or "").strip(" []")
         return raw
 
     async def get_chat_item_count(self) -> int:
@@ -111,3 +115,91 @@ class BossChatListPage:
         if raw:
             return raw[0].get("text", "")
         return None
+
+    # --- 等待元素辅助 ---
+
+    async def _wait_visible(self, select: str, *, filter: dict | None = None, timeout: float = 10.0) -> dict | None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            bbox = await self._session.bbox(select=select, filter=filter)
+            if bbox is not None:
+                return bbox
+            await asyncio.sleep(0.3)
+        return None
+
+    async def _wait_hidden(self, select: str, *, timeout: float = 5.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            bbox = await self._session.bbox(select=select)
+            if bbox is None:
+                return True
+            await asyncio.sleep(0.3)
+        return False
+
+    # --- 右侧聊天详情操作 ---
+
+    async def click_chat_item(self, index: int = 0) -> bool:
+        bbox = await self._session.bbox(select=_LIST_ITEM, filter={"index": index})
+        if bbox is None:
+            log.warning("未找到聊天项 #%d", index)
+            return False
+        log.info("点击聊天项 #%d  (%d,%d)", index, bbox["physical"]["cx"], bbox["physical"]["cy"])
+        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
+        loaded = await self._wait_visible(_TOP_INFO)
+        if not loaded:
+            log.warning("点击聊天项后右侧面板未加载")
+            return False
+        return True
+
+    async def click_more_button(self) -> bool:
+        bbox = await self._session.bbox(select=_MORE_LABEL)
+        if bbox is None:
+            log.warning("未找到更多按钮")
+            return False
+        log.info("点击更多按钮  (%d,%d)", bbox["physical"]["cx"], bbox["physical"]["cy"])
+        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
+        opened = await self._wait_visible(_DROPDOWN_LIST)
+        if not opened:
+            log.warning("点击更多后下拉菜单未展开")
+            return False
+        return True
+
+    async def click_delete_in_menu(self) -> bool:
+        bbox = await self._session.bbox(
+            select=_DROPDOWN_ITEM_SPAN,
+            filter={"textContains": "删除"},
+        )
+        if bbox is None:
+            log.warning("未找到删除菜单项")
+            return False
+        log.info("点击删除  (%d,%d)", bbox["physical"]["cx"], bbox["physical"]["cy"])
+        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
+        opened = await self._wait_visible(_DIALOG_WRAPPER)
+        if not opened:
+            log.warning("点击删除后弹窗未出现")
+            return False
+        return True
+
+    async def click_cancel_in_dialog(self) -> bool:
+        bbox = await self._session.bbox(select=_DIALOG_CANCEL)
+        if bbox is None:
+            log.warning("未找到取消按钮")
+            return False
+        log.info("点击取消  (%d,%d)", bbox["physical"]["cx"], bbox["physical"]["cy"])
+        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
+        hidden = await self._wait_hidden(_DIALOG_WRAPPER)
+        if not hidden:
+            log.warning("弹窗未关闭")
+        return True
+
+    async def click_confirm_in_dialog(self) -> bool:
+        bbox = await self._session.bbox(select=_DIALOG_CONFIRM)
+        if bbox is None:
+            log.warning("未找到确定按钮")
+            return False
+        log.info("点击确定  (%d,%d)", bbox["physical"]["cx"], bbox["physical"]["cy"])
+        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
+        hidden = await self._wait_hidden(_DIALOG_WRAPPER)
+        if not hidden:
+            log.warning("弹窗未关闭")
+        return True

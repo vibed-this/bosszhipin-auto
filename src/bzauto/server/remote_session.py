@@ -173,7 +173,10 @@ class RemoteSession:
             "filter": filter,
             "return": "bbox",
         }
-        return await self._registry.call("query", data, timeout=timeout)
+        result = await self._registry.call("query", data, timeout=timeout)
+        if isinstance(result, dict) and "data" in result:
+            return result["data"]
+        return result
 
     async def dump_html(
         self,
