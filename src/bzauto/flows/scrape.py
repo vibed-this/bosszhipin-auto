@@ -41,48 +41,59 @@ class BossScrapeFlow:
         if not loaded:
             log.warning("页面加载超时，继续尝试...")
 
+        log.info("切换到期望职位tab...")
+        ok = await self._page.click_expect_tab()
+        if not ok:
+            log.warning("未找到期望tab，使用默认列表")
+
         all_jobs: list[dict[str, Any]] = []
+        seen: set[str] = set()
 
-        for scroll in range(max_scrolls):
-            if scroll > 0:
-                log.info("翻页 #%d...", scroll)
-                ok = await self._page.scroll_next_page()
-                if not ok:
-                    break
-                await asyncio.sleep(random.uniform(0.5, 1.5))
+        async for card, idx in self._page.iter_job_cards(max_scrolls=max_scrolls):
+            title = (card.get("title") or "").strip().lower()
+            if not any(kw in title for kw in _WHITELIST):
+                continue
+            if any(kw in title for kw in _BLACKLIST):
+                continue
 
-            cards = await self._page.get_job_cards(limit=30)
-            if not cards:
-                log.info("没有更多职位")
-                break
+            key = (card.get("title") or "", card.get("company") or "")
+            if key in seen:
+                continue
+            seen.add(key)
 
-            log.info("第 %d 页: %d 个职位", scroll + 1, len(cards))
+            log.info("  [#%d] %s — %s", idx, card.get("title"), card.get("salary_raw"))
+            all_jobs.append(card)
 
-            for i, card in enumerate(cards):
-                title = (card.get("title") or "").strip().lower()
-                if not any(kw in title for kw in _WHITELIST):
-                    continue
-                if any(kw in title for kw in _BLACKLIST):
-                    continue
+            await self._session.execute(
+                "(function(){"
+                f"  var cards = document.querySelectorAll('li.job-card-box');"
+                f"  var c = cards[{idx}];"
+                "  if (c) { c.scrollIntoView({block:'center'}); c.click(); }"
+                "})()"
+            )
+            await asyncio.sleep(0.5)
 
-                log.info("  [#%d] %s — %s", i, card.get("title"), card.get("salary_raw"))
-                all_jobs.append(card)
-
-                bbox = await self._session.bbox(
-                    select="a.op-btn-chat",
-                    filter={"nth": len(all_jobs) - 1},
+            bbox = await self._session.bbox(select="a.op-btn-chat")
+            if bbox:
+                log.info(
+                    "  点击沟通按钮 #%d  css=(%d,%d)  physical=(%d,%d)",
+                    idx,
+                    bbox["css"]["cx"], bbox["css"]["cy"],
+                    bbox["physical"]["cx"], bbox["physical"]["cy"],
                 )
-                if bbox:
-                    await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
-                    await asyncio.sleep(random.uniform(1.0, 2.0))
+                await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
+                await asyncio.sleep(random.uniform(1.0, 2.0))
 
-                    sent = await self._send_greeting()
-                    if sent:
-                        log.info("  打招呼成功")
-                    else:
-                        log.warning("  打招呼可能失败")
+                sent = await self._send_greeting()
+                if sent:
+                    log.info("  打招呼成功")
+                else:
+                    log.warning("  打招呼可能失败")
 
-                    await self._dismiss_dialogs()
+                result = await self._dismiss_dialogs()
+                if not result:
+                    log.warning("每日沟通上限已达，终止抓取")
+                    break
 
             await asyncio.sleep(random.uniform(0.5, 1.0))
 
@@ -93,6 +104,11 @@ class BossScrapeFlow:
         try:
             chat_btn = await self._session.bbox("a.op-btn-chat")
             if chat_btn:
+                log.info(
+                    "  点击打招呼按钮  css=(%d,%d)  physical=(%d,%d)",
+                    chat_btn["css"]["cx"], chat_btn["css"]["cy"],
+                    chat_btn["physical"]["cx"], chat_btn["physical"]["cy"],
+                )
                 await self._session.click(chat_btn["physical"]["cx"], chat_btn["physical"]["cy"])
                 await asyncio.sleep(1.0)
                 return True
@@ -100,18 +116,54 @@ class BossScrapeFlow:
             log.debug("打招呼异常: %s", e)
         return False
 
-    async def _dismiss_dialogs(self) -> None:
+    async def _check_chat_block_dialog(self) -> bool:
+        """检查沟通上限弹窗。返回 True 继续，False 终止。无弹窗返回 True。"""
+        raw = await self._session.query(
+            select=".chat-block-dialog .chat-block-body",
+            return_="raw",
+        )
+        if not raw:
+            return True
+        text = raw[0].get("text", "")
+        log.info("  沟通上限弹窗: %s", text)
+
+        bbox = await self._session.bbox(select=".chat-block-dialog .sure-btn")
+        if bbox and bbox["css"]["cx"] > 0:
+            log.info(
+                "  点击关闭  css=(%d,%d)  physical=(%d,%d)",
+                bbox["css"]["cx"], bbox["css"]["cy"],
+                bbox["physical"]["cx"], bbox["physical"]["cy"],
+            )
+            await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
+            await asyncio.sleep(0.5)
+
+        if "150" in text or "消息已满" in text or "明日再试" in text:
+            return False
+        return True
+
+    async def _dismiss_dialogs(self) -> bool:
+        """关闭弹窗。返回 True 继续，False 终止。"""
+        if not await self._check_chat_block_dialog():
+            return False
+
         for selector in [
             ".greet-boss-dialog .cancel-btn",
             ".dialog-close",
-            "[class*='dialog'] .close",
+            ".dialog-wrap .close",
+            ".boss-dialog .close",
             ".tips-success .close",
         ]:
             try:
                 bbox = await self._session.bbox(selector)
-                if bbox:
-                    log.info("关闭弹窗: %s", selector)
+                if bbox and bbox["css"]["cx"] > 0:
+                    log.info(
+                        "  关闭弹窗 %s  css=(%d,%d)  physical=(%d,%d)",
+                        selector,
+                        bbox["css"]["cx"], bbox["css"]["cy"],
+                        bbox["physical"]["cx"], bbox["physical"]["cy"],
+                    )
                     await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
                     await asyncio.sleep(0.5)
             except Exception:
                 pass
+        return True

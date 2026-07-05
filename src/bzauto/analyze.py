@@ -89,7 +89,8 @@ class PageAnalyzer:
 
     async def dump_common_elements(self) -> None:
         groups = [
-            ("职位列表", [".job-list-box", "li.job-card-box", ".job-card-wrapper"]),
+            ("职位列表", [".job-list-container", "li.job-card-box", ".job-card-wrap"]),
+            ("期望tab", ["a.expect-item", ".expect-list", ".expect-and-search"]),
             ("弹窗", [
                 ".dialog-wrap", ".dialog", "[class*='dialog']",
                 "[class*='modal']", "[class*='popup']",
@@ -97,6 +98,7 @@ class PageAnalyzer:
                 ".greet-boss-dialog",
             ]),
             ("沟通按钮", ["a.op-btn-chat", ".op-btn-chat", "[class*='chat']"]),
+            ("薪资/公司", [".job-salary", ".salary", ".boss-name", ".company-name"]),
             ("表单/输入框", ["input", "textarea", "select"]),
             ("按钮", ["button", ".btn", "[class*='btn']", "[class*='button']"]),
         ]
