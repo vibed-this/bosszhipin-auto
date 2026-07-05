@@ -142,7 +142,19 @@ class RemoteSession:
         filter: dict | None = None,
         timeout: float = 30.0,
     ) -> dict | None:
-        return await self.query(
-            chrome_tab_id, select=select, filter=filter,
-            return_="bbox", timeout=timeout,
+        return await self._registry.send(
+            "query", timeout=timeout,
+            chromeTabId=chrome_tab_id, select=select,
+            filter=filter, **{"return": "bbox"},
+        )
+
+    async def dump_html(
+        self,
+        chrome_tab_id: int,
+        timeout: float = 30.0,
+    ) -> str | None:
+        """Dump 页面完整 HTML（document.documentElement.outerHTML）。"""
+        return await self._registry.send(
+            "dump_html", timeout=timeout,
+            chromeTabId=chrome_tab_id,
         )

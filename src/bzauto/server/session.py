@@ -181,6 +181,10 @@ class TabSession:
     ) -> dict | None:
         return await self._rsession.bbox(self._require_tab(), select, filter=filter, timeout=timeout)
 
+    async def dump_html(self, timeout: float = 30.0) -> str | None:
+        """Dump 页面完整 HTML（document.documentElement.outerHTML）。"""
+        return await self._rsession.dump_html(self._require_tab(), timeout=timeout)
+
     def on(self, event: str, callback: Any) -> None:
         self._registry.on(event, callback)
 

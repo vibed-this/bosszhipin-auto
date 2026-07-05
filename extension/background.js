@@ -203,6 +203,9 @@
       case "query":
         handleQuery(msg.id, msg.chromeTabId, msg.select, msg.filter, msg.project, msg["return"]);
         break;
+      case "dump_html":
+        handleDumpHtml(msg.id, msg.chromeTabId);
+        break;
     }
   }
 
@@ -320,6 +323,21 @@
   }
 
   // ── Scripting: query ───────────────────────────────────────
+
+  async function handleDumpHtml(id, chromeTabId) {
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: chromeTabId },
+        world: "ISOLATED",
+        func: function () {
+          return document.documentElement.outerHTML;
+        },
+      });
+      sendResult(id, results[0]?.result || null, null);
+    } catch (e) {
+      sendResult(id, null, e.message);
+    }
+  }
 
   const QUERY_FUNC = function (args) {
     function bboxOf(el) {
