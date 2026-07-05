@@ -141,6 +141,57 @@ tabs = await session.list_tabs()
 tracked = session.list_tracked_tabs()
 ```
 
+## analyze.py — 页面分析工具
+
+用于开发时分析页面 DOM 结构、查找弹窗、定位元素坐标。
+
+### 用法
+
+```python
+from analyze import PageAnalyzer
+
+async def main():
+    async with PageAnalyzer() as pa:
+        # 自动连接已打开的 BOSS 直聘标签
+        await pa.connect()
+
+        # 扫描常见 UI 组件（列表、弹窗、按钮等）
+        await pa.dump_common_elements()
+
+        # 查看指定选择器的 HTML
+        await pa.dump(".greet-boss-dialog")
+
+        # 查找包含文本的元素（走 query filter，绕过 CSP）
+        await pa.find_text("留在本页")
+
+        # 获取元素屏幕坐标（自动 scrollIntoView）
+        b = await pa.bbox(".greet-boss-dialog .cancel-btn")
+        if b:
+            print(f"坐标: {b['physical']['cx']}, {b['physical']['cy']}")
+
+        # 查找可见弹窗（需要 CSP 允许 eval，否则 fallback 为空）
+        await pa.dump_visible_dialogs()
+
+        # 页面快照
+        await pa.snapshot()
+```
+
+### 原理
+
+- 启动内嵌 uvicorn 服务，复用扩展的 WS 连接
+- 所有 `dump` / `find_text` 走 `session.query`（`chrome.scripting.executeScript`，绕过页面 CSP）
+- `dump_visible_dialogs` / `snapshot` 走 `session.execute`（content.js eval），受 CSP 限制
+- 需要浏览器扩展已安装并连接到 WS
+
+### 调试流程
+
+1. 浏览器已打开 BOSS 直聘页面，扩展已连接
+2. 运行分析脚本或直接在代码中引入 `PageAnalyzer`
+3. 先用 `dump_common_elements()` 看有哪些弹窗类元素
+4. 用 `find_text("留在此页")` 定位目标文本
+5. 用 `bbox()` 获取点击坐标
+6. 将确定的选择器和流程搬进 `scrape_jobs.py`
+
 ## 约定
 
 - 不使用 Playwright / Selenium 等浏览器自动化库
