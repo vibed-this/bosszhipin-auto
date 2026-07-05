@@ -13,16 +13,6 @@
     "https://*.bosszhipin.com/*",
     "ws://127.0.0.1/*"
   ],
-  "content_scripts": [
-    {
-      "matches": [
-        "https://*.zhipin.com/*",
-        "https://*.bosszhipin.com/*"
-      ],
-      "js": ["content.js"],
-      "run_at": "document_start"
-    }
-  ],
   "background": {
     "service_worker": "background.js"
   }

@@ -127,7 +127,7 @@ class PageAnalyzer:
                 });
                 return visible;
             })()
-        """, world="isolated")
+        """, world="main")
         if result:
             log.info("可见弹窗 %d 个:", len(result))
             for r in result:
@@ -138,13 +138,15 @@ class PageAnalyzer:
         return result or []
 
     async def snapshot(self) -> str:
-        result = await self._session.execute(
-            "document.body.innerHTML.slice(0, 2000)", world="isolated",
+        result = await self._session.query(
+            select="body", return_="raw",
         )
         if result:
-            for line in result.split("\n"):
+            html = result[0].get("html", "")
+            for line in html.split("\n"):
                 log.info("  %s", line)
-        return result or ""
+            return html
+        return ""
 
 
 async def main():

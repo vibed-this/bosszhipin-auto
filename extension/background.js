@@ -198,7 +198,7 @@
         handleListTabs(msg.id);
         break;
       case "execute":
-        handleExecute(msg.id, msg.chromeTabId, msg.code, msg.world, msg.execId);
+        handleExecute(msg.id, msg.chromeTabId, msg.execId);
         break;
       case "query":
         handleQuery(msg.id, msg.chromeTabId, msg.select, msg.filter, msg.project, msg["return"]);
@@ -266,23 +266,11 @@
     }
   }
 
-  // ── Execute (via content.js CSP-exempt eval) ───────────────
+  // ── Execute (via <script src="/exec/{execId}">) ─────────────
 
-  async function handleExecute(id, chromeTabId, code, world, execId) {
+  async function handleExecute(id, chromeTabId, execId) {
     try {
-      if (world === "main") {
-        await handleExecuteMain(id, chromeTabId, execId);
-      } else {
-        const resp = await chrome.tabs.sendMessage(chromeTabId, {
-          type: "execute",
-          code: code,
-        });
-        if (resp.error) {
-          sendResult(id, null, resp.error);
-        } else {
-          sendResult(id, resp.data, null);
-        }
-      }
+      await handleExecuteMain(id, chromeTabId, execId);
     } catch (e) {
       sendResult(id, null, e.message);
     }

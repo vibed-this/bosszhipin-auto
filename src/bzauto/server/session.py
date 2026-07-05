@@ -154,10 +154,9 @@ class TabSession:
         self,
         code: str,
         *,
-        world: str = "main",
         timeout: float = 30.0,
     ) -> Any:
-        return await self._rsession.execute(self._require_tab(), code, world=world, timeout=timeout)
+        return await self._rsession.execute(self._require_tab(), code, timeout=timeout)
 
     async def query(
         self,

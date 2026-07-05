@@ -99,28 +99,22 @@ class RemoteSession:
         self,
         chrome_tab_id: int,
         code: str,
-        world: str = "main",
         timeout: float = 30.0,
     ) -> Any:
-        if world == "main":
-            exec_id = str(uuid.uuid4())
-            wrapped = (
-                f'(async function(){{\n'
-                f'{code}\n'
-                f'}})().then(function(r){{\n'
-                f'  window.postMessage({{type:"boss_exec_result",id:"{exec_id}",data:JSON.parse(JSON.stringify(r!==undefined?r:null))}},"*");\n'
-                f'}},function(e){{\n'
-                f'  window.postMessage({{type:"boss_exec_result",id:"{exec_id}",error:e&&e.message?e.message:String(e)}},"*");\n'
-                f'}});'
-            )
-            self._registry._exec_store[exec_id] = wrapped
-            return await self._registry.send(
-                "execute", timeout=timeout,
-                chromeTabId=chrome_tab_id, execId=exec_id, world=world,
-            )
+        exec_id = str(uuid.uuid4())
+        wrapped = (
+            f'(async function(){{\n'
+            f'{code}\n'
+            f'}})().then(function(r){{\n'
+            f'  window.postMessage({{type:"boss_exec_result",id:"{exec_id}",data:JSON.parse(JSON.stringify(r!==undefined?r:null))}},"*");\n'
+            f'}},function(e){{\n'
+            f'  window.postMessage({{type:"boss_exec_result",id:"{exec_id}",error:e&&e.message?e.message:String(e)}},"*");\n'
+            f'}});'
+        )
+        self._registry._exec_store[exec_id] = wrapped
         return await self._registry.send(
             "execute", timeout=timeout,
-            chromeTabId=chrome_tab_id, code=code, world=world,
+            chromeTabId=chrome_tab_id, execId=exec_id,
         )
 
     async def query(
