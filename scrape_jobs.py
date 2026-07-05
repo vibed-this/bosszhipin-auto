@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import time
 from typing import Any
 
@@ -47,6 +48,10 @@ _SALARY_DECODE = {
 
 def _decode_salary(text: str) -> str:
     return ''.join(_SALARY_DECODE.get(ch, ch) for ch in text)
+
+
+async def sleep(interval: tuple[float, float]) -> None:
+    await asyncio.sleep(random.uniform(*interval))
 
 
 class BossJobsAuto:
@@ -327,7 +332,55 @@ class BossJobsAuto:
             await self._click(b_btn["physical"]["cx"], b_btn["physical"]["cy"])
             log.info("已向「%s」发送沟通", job["title"][:40])
             applied.add(job["link"])
-            await asyncio.sleep(2.0)
+
+            # 处理成功弹窗：点击「留在本页」并等待消失
+            await self._dismiss_greet_dialog()
+
+            # 随机等待后继续
+            await sleep((1.5, 4.0))
+
+    async def _dismiss_greet_dialog(self, timeout: float = 10.0) -> bool:
+        """等待沟通成功弹窗，点击「留在本页」，等待弹窗关闭。"""
+        deadline = time.monotonic() + timeout
+
+        # 等待弹窗出现
+        while time.monotonic() < deadline:
+            dialog = await self.session.query(
+                self._tid(),
+                select=".greet-boss-dialog",
+                return_="raw",
+            )
+            if dialog:
+                break
+            await asyncio.sleep(0.3)
+        else:
+            log.warning("沟通成功弹窗未出现")
+            return False
+
+        await asyncio.sleep(0.5)
+
+        # 点击「留在本页」
+        b = await self.session.bbox(self._tid(), ".greet-boss-dialog .cancel-btn")
+        if b:
+            await self._click(b["physical"]["cx"], b["physical"]["cy"])
+            log.info("已点击「留在本页」")
+        else:
+            log.warning("未找到「留在本页」按钮")
+
+        # 等待弹窗消失
+        while time.monotonic() < deadline:
+            dialog = await self.session.query(
+                self._tid(),
+                select=".greet-boss-dialog",
+                return_="raw",
+            )
+            if not dialog:
+                log.info("沟通弹窗已关闭")
+                return True
+            await asyncio.sleep(0.3)
+
+        log.warning("等待弹窗关闭超时")
+        return False
 
     @staticmethod
     def _matches(title: str) -> bool:

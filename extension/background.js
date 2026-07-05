@@ -402,7 +402,7 @@
 
       switch (args["return"]) {
         case "bbox":
-          data = matched[0] ? bboxOf(matched[0]) : null;
+          data = matched[0] ? (matched[0].scrollIntoView({block: 'center', behavior: 'instant'}), bboxOf(matched[0])) : null;
           break;
         case "bboxList":
           data = matched.map(bboxOf);
