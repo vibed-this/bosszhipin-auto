@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import json
 import logging
+import os
 import sys
 import threading
 from pathlib import Path
 from typing import Any
+
+import keyboard
 
 from PySide6.QtCore import Signal, QObject
 from PySide6.QtWidgets import QApplication
@@ -14,7 +18,11 @@ from PySide6.QtWidgets import QApplication
 from bzauto.ui.control_panel import ControlPanel
 from bzauto.ui.log_window import LogWindow
 from bzauto.pages.chat_list import BossChatListPage
+from bzauto.pages.job_list import BossJobListPage
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
+from bzauto.flows.scrape_only import BossScrapeOnlyFlow
+from bzauto.flows.scrape import BossScrapeFlow
+from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.server.tab_session import TabSession
 from bzauto.server.lifecycle import start_server
 
@@ -31,7 +39,6 @@ class _TaskBridge(QObject):
     """跨线程信号桥：后台线程 → Qt 主线程。"""
 
     buttons_enabled = Signal(bool)
-    log_msg = Signal(str)
 
 
 class BzAutoApp:
@@ -84,26 +91,77 @@ class BzAutoApp:
         # 跨线程信号连接
         self._bridge.buttons_enabled.connect(self._control.set_buttons_enabled)
 
+        # 全局退出快捷键
+        keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
+        log.info("按 Ctrl+E 强制退出")
+
         # 连接按钮信号
-        self._control.btn_scrape_chat.clicked.connect(
-            lambda: self._on_scrape_chat()
-        )
+        self._control.btn_scrape_chat.clicked.connect(lambda: self._on_scrape_chat())
+        self._control.btn_delete_chat.clicked.connect(lambda: self._on_delete_chat())
+        self._control.btn_dump.clicked.connect(lambda: self._on_scrape_jobs())
+        self._control.btn_batch.clicked.connect(lambda: self._on_batch_chat())
 
     def _on_scrape_chat(self) -> None:
-        """聊天爬取按钮点击。"""
+        """聊天爬取。"""
         output_dir = Path("output")
         output_dir.mkdir(exist_ok=True)
 
         async def _task() -> None:
             session = TabSession()
-            try:
-                page = BossChatListPage(session)
-                flow = BossScrapeChatFlow(page, session)
-                out_file = output_dir / f"chat_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"
-                data = await flow.run(max_scrolls=0, output=out_file)
-                log.info("聊天爬取完成: %d 条记录 -> %s", len(data), out_file)
-            finally:
-                pass
+            page = BossChatListPage(session)
+            flow = BossScrapeChatFlow(page, session)
+            out_file = output_dir / f"chat_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"
+            data = await flow.run(max_scrolls=0, output=out_file)
+            log.info("聊天爬取完成: %d 条记录 -> %s", len(data), out_file)
+
+        self._run_task(_task)
+
+    def _on_scrape_jobs(self) -> None:
+        """职位爬取（纯抓取，不沟通）。"""
+        output_dir = Path("output")
+        output_dir.mkdir(exist_ok=True)
+
+        async def _task() -> None:
+            session = TabSession()
+            page = BossJobListPage(session)
+            flow = BossScrapeOnlyFlow(page, session)
+            jobs = await flow.run(max_scrolls=10)
+            out_file = output_dir / f"jobs_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"
+            out_file.write_text(
+                json.dumps([j.to_dict() for j in jobs], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            log.info("职位爬取完成: %d 条 -> %s", len(jobs), out_file)
+
+        self._run_task(_task)
+
+    def _on_batch_chat(self) -> None:
+        """批量沟通（抓取 + 自动沟通）。"""
+        output_dir = Path("output")
+        output_dir.mkdir(exist_ok=True)
+
+        async def _task() -> None:
+            session = TabSession()
+            page = BossJobListPage(session)
+            flow = BossScrapeFlow(page, session)
+            jobs = await flow.run(max_scrolls=10)
+            out_file = output_dir / f"batch_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"
+            out_file.write_text(
+                json.dumps([j.to_dict() for j in jobs], ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            log.info("批量沟通完成: %d 条 -> %s", len(jobs), out_file)
+
+        self._run_task(_task)
+
+    def _on_delete_chat(self) -> None:
+        """聊天删拒：遍历聊天列表，删除拒信。"""
+        async def _task() -> None:
+            session = TabSession()
+            page = BossChatListPage(session)
+            flow = BossDeleteChatFlow(page, session)
+            result = await flow.run(dry_run=False)
+            log.info("聊天删拒完成: 共删除 %d 条", len(result))
 
         self._run_task(_task)
 
@@ -137,7 +195,6 @@ class BzAutoApp:
             log.info("任务已取消")
         elif future.exception():
             log.error("任务失败: %s", future.exception())
-        # 通过信号在 Qt 线程恢复按钮
         self._bridge.buttons_enabled.emit(True)
 
     def run(self) -> None:

@@ -4,9 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QFrame,
-    QHBoxLayout,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -27,33 +25,17 @@ class ControlPanel(QWidget):
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(0)
 
-        # Row: checkboxes
-        cb_row = QHBoxLayout()
-        cb_row.setSpacing(6)
-        self.chk_scrape = QCheckBox("抓取")
-        self.chk_scrape.setFixedSize(55, 20)
-        self.chk_scrape.setChecked(True)
-        self.chk_delete = QCheckBox("删拒")
-        self.chk_delete.setFixedSize(55, 20)
-        self.chk_urge = QCheckBox("催促")
-        self.chk_urge.setFixedSize(55, 20)
-        cb_row.addWidget(self.chk_scrape)
-        cb_row.addWidget(self.chk_delete)
-        cb_row.addWidget(self.chk_urge)
-        cb_row.addStretch()
-        layout.addLayout(cb_row)
-
-        # Button: 聊天
-        layout.addSpacing(2)
-        self.btn_chat = QPushButton("聊天")
-        self.btn_chat.setFixedHeight(28)
-        layout.addWidget(self.btn_chat)
-
         # Button: 聊天爬取
         layout.addSpacing(2)
         self.btn_scrape_chat = QPushButton("聊天爬取")
         self.btn_scrape_chat.setFixedHeight(28)
         layout.addWidget(self.btn_scrape_chat)
+
+        # Button: 聊天删拒
+        layout.addSpacing(2)
+        self.btn_delete_chat = QPushButton("聊天删拒")
+        self.btn_delete_chat.setFixedHeight(28)
+        layout.addWidget(self.btn_delete_chat)
 
         # Separator
         layout.addSpacing(4)
@@ -62,9 +44,9 @@ class ControlPanel(QWidget):
         sep.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep)
 
-        # Button: 开始职位爬取
+        # Button: 职位爬取
         layout.addSpacing(2)
-        self.btn_dump = QPushButton("开始职位爬取")
+        self.btn_dump = QPushButton("职位爬取")
         self.btn_dump.setFixedHeight(28)
         layout.addWidget(self.btn_dump)
 
@@ -81,16 +63,10 @@ class ControlPanel(QWidget):
         sep2.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep2)
 
-        # Button: 催促
+        # Button: 退出 (Ctrl+E)
         layout.addSpacing(2)
-        self.btn_urge = QPushButton("催促")
-        self.btn_urge.setFixedHeight(28)
-        layout.addWidget(self.btn_urge)
-
-        # Button: 退出
-        layout.addSpacing(6)
-        self.btn_exit = QPushButton("退出")
-        self.btn_exit.setFixedHeight(20)
+        self.btn_exit = QPushButton("退出 (Ctrl+E)")
+        self.btn_exit.setFixedHeight(28)
         self.btn_exit.clicked.connect(QApplication.quit)
         layout.addWidget(self.btn_exit)
 
@@ -99,11 +75,10 @@ class ControlPanel(QWidget):
 
         # 所有任务按钮（退出除外），用于任务执行时禁用/启用
         self.task_buttons = [
-            self.btn_chat,
             self.btn_scrape_chat,
+            self.btn_delete_chat,
             self.btn_dump,
             self.btn_batch,
-            self.btn_urge,
         ]
 
     def set_buttons_enabled(self, enabled: bool) -> None:
