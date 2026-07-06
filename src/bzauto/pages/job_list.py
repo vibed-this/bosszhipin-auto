@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from typing import Any, AsyncIterator
 
+from bzauto.browser.session import BrowserSession
 from bzauto.models import JobCard
 from bzauto.pages.base import BasePage
-from bzauto.server.tab_session import TabSession
 
 log = logging.getLogger("page.job_list")
 
@@ -66,14 +67,14 @@ class BossJobListPage(BasePage):
 
     _LOADED_SELECTOR = "li.job-card-box"
 
-    def __init__(self, session: TabSession) -> None:
+    def __init__(self, session: BrowserSession) -> None:
         super().__init__(session)
+        self._session: BrowserSession = session
 
     async def get_job_cards(self) -> list[JobCard]:
-        cards = await self._session.query(
+        cards = await self._session.find_all(
             select=_JOB_ITEM,
             project=_JOB_PROJECT,
-            return_="list",
         )
         result: list[JobCard] = []
         for card in cards:
@@ -83,33 +84,29 @@ class BossJobListPage(BasePage):
         return result
 
     async def get_job_card_at(self, index: int) -> JobCard | None:
-        raw = await self._session.query(
+        raw = await self._session.find_one(
             select=_JOB_ITEM,
             filter={"index": index},
             project=_JOB_PROJECT,
-            return_="list",
         )
         if not raw:
             return None
-        if "salary" in raw[0]:
-            raw[0]["salary"] = _decode_salary_icon(raw[0]["salary"])
-        return JobCard.from_query_row(raw[0])
+        if "salary" in raw:
+            raw["salary"] = _decode_salary_icon(raw["salary"])
+        return JobCard.from_query_row(raw)
 
     async def click_card_at(self, index: int) -> bool:
-        """点击指定索引的职位卡片。"""
-        await self._session.execute(
-            f"(function(){{"
-            f"  var cards = document.querySelectorAll('{_JOB_ITEM}');"
-            f"  var c = cards[{index}];"
-            "  if (c) { c.scrollIntoView({block:'center'}); c.click(); }"
-            "})()"
+        """点击指定索引的职位卡片 — 通过 bbox → Qt 事件。"""
+        await self._session.click_element(
+            _JOB_ITEM,
+            filter={"index": index},
+            post_sleep=0.5,
         )
-        await asyncio.sleep(0.5)
         return True
 
     async def click_chat(self, index: int = 0) -> None:
         """等待沟通按钮出现后点击。"""
-        from bzauto.server.registry import ElementNotFound
+        from bzauto.browser.session import ElementNotFound
 
         deadline = asyncio.get_event_loop().time() + 30.0
         last_error: Exception | None = None
@@ -136,37 +133,28 @@ class BossJobListPage(BasePage):
 
     async def dismiss_dialogs(self) -> bool:
         """关闭弹窗。返回 True 继续，False 终止。无弹窗返回 True。"""
-        from bzauto.server.registry import ElementNotFound
+        from bzauto.browser.session import ElementNotFound
 
         for selector in _DIALOG_SELECTORS:
             try:
                 bbox = await self._session.bbox(selector)
-                if bbox and bbox["css"]["cx"] > 0:
-                    log.info(
-                        "  关闭弹窗 %s  css=(%d,%d)  physical=(%d,%d)",
-                        selector,
-                        bbox["css"]["cx"], bbox["css"]["cy"],
-                        bbox["physical"]["cx"], bbox["physical"]["cy"],
-                    )
-                    await self._session.click(
-                        bbox["physical"]["cx"], bbox["physical"]["cy"]
-                    )
+                if bbox and bbox.get("cx", 0) > 0:
+                    log.info("  关闭弹窗 %s  cx=%d cy=%d", selector, bbox["cx"], bbox["cy"])
+                    await self._session.click(int(bbox["cx"]), int(bbox["cy"]))
                     await asyncio.sleep(0.5)
             except (ElementNotFound, TimeoutError, ConnectionError) as e:
                 log.debug("关闭弹窗失败 %s: %s", selector, e)
 
-        raw = await self._session.query(
+        items = await self._session.find_all(
             select=".chat-block-dialog .chat-block-body",
-            return_="raw",
+            project={"text": "@text"},
         )
-        if raw:
-            text = raw[0].get("text", "")
+        if items:
+            text = items[0].get("text", "")
             log.info("  沟通上限弹窗: %s", text)
             bbox = await self._session.bbox(select=".chat-block-dialog .sure-btn")
-            if bbox and bbox["css"]["cx"] > 0:
-                await self._session.click(
-                    bbox["physical"]["cx"], bbox["physical"]["cy"]
-                )
+            if bbox and bbox.get("cx", 0) > 0:
+                await self._session.click(int(bbox["cx"]), int(bbox["cy"]))
                 await asyncio.sleep(0.5)
             if "150" in text or "消息已满" in text or "明日再试" in text:
                 return False
@@ -174,12 +162,13 @@ class BossJobListPage(BasePage):
 
     async def find_card_by_href(self, href: str) -> int:
         """通过 href 查找卡片索引。未找到返回 -1。"""
-        result = await self._session.execute(
+        href_suffix = json.dumps(href.split("/").pop())
+        result = await self._session.eval_js(
             f"(function(){{"
             f"  var cards = document.querySelectorAll('{_JOB_ITEM}');"
             f"  for (var i = 0; i < cards.length; i++) {{"
             f"    var link = cards[i].querySelector('{_JOB_LINK}');"
-            f"    if (link && link.href && (link.href === '{href}' || link.href.includes('{href.split('/').pop()}'))) {{"
+            f"    if (link && link.href.includes({href_suffix})) {{"
             f"      return i;"
             f"    }}"
             f"  }}"
@@ -189,10 +178,11 @@ class BossJobListPage(BasePage):
         return int(result) if result is not None else -1
 
     async def get_salary_texts(self) -> list[str]:
-        raw = await self._session.query(
-            select=_SALARY, return_="raw",
+        items = await self._session.find_all(
+            select=_SALARY,
+            project={"text": "@text"},
         )
-        return [r.get("text", "") for r in raw] if raw else []
+        return [item["text"] for item in items]
 
     async def get_salary_info(self) -> dict[str, Any] | None:
         texts = await self.get_salary_texts()
@@ -233,7 +223,7 @@ class BossJobListPage(BasePage):
 
                 log.info("数据耗尽，尝试智能滚动 #%d...", scroll_count)
 
-                await self._session.execute(
+                await self._session.eval_js(
                     "(function(){"
                     "  var c = document.querySelector('.job-list-container');"
                     "  if (c) c.scrollTop = c.scrollHeight;"
@@ -244,11 +234,11 @@ class BossJobListPage(BasePage):
 
                 bbox = await self._session.bbox(select="div.job-list-container")
                 if bbox:
-                    cx = bbox["css"]["cx"]
-                    cy = bbox["css"]["cy"]
-                    await self._session.scroll_wheel(50, at_x=cx, at_y=cy, presses=3)
+                    cx = bbox["cx"]
+                    cy = bbox["cy"]
+                    await self._session.scroll_wheel(50, at_x=int(cx), at_y=int(cy), presses=3)
                     await asyncio.sleep(0.3)
-                    await self._session.scroll_wheel(-50, at_x=cx, at_y=cy, presses=6)
+                    await self._session.scroll_wheel(-50, at_x=int(cx), at_y=int(cy), presses=6)
                     await asyncio.sleep(scroll_timeout)
                 else:
                     await asyncio.sleep(scroll_timeout)

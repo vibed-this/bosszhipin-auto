@@ -14,15 +14,13 @@ from pydantic import BaseModel, ConfigDict
 log = logging.getLogger("boss.config")
 
 
-class ServerConfig(BaseModel):
-    """服务监听配置。
+class BrowserConfig(BaseModel):
+    """浏览器配置。
 
-    :ivar host: 监听地址
-    :ivar port: 监听端口
+    :ivar profiles_dir: 浏览器用户数据目录
     """
 
-    host: str = "127.0.0.1"
-    port: int = 8765
+    profiles_dir: str = "profiles"
 
 
 class StorageConfig(BaseModel):
@@ -132,7 +130,6 @@ class AccountConfig(BaseModel):
 
     :ivar id: 账号唯一标识
     :ivar name: 账号显示名称
-    :ivar profile: Chrome 用户配置文件名称
     :ivar daily_limit: 每日投递上限
     :ivar enabled: 是否启用
     :ivar role: 角色（scraper / dispatcher）
@@ -140,7 +137,6 @@ class AccountConfig(BaseModel):
 
     id: str = ""
     name: str = ""
-    profile: str = "Default"
     daily_limit: int = 150
     enabled: bool = True
     role: str = "dispatcher"
@@ -154,7 +150,7 @@ class AppConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    server: ServerConfig = ServerConfig()
+    browser: BrowserConfig = BrowserConfig()
     storage: StorageConfig = StorageConfig()
     scrape: ScrapeConfig = ScrapeConfig()
     delete: DeleteConfig = DeleteConfig()
@@ -180,9 +176,8 @@ def _default_config_path() -> Path:
 def _write_default_template(path: Path) -> None:
     """写入默认配置文件模板。"""
     template = """\
-[server]
-host = "127.0.0.1"
-port = 8765
+[browser]
+profiles_dir = "profiles"
 
 [storage]
 db_path = "data/bzauto.tinydb"
@@ -224,7 +219,6 @@ token = ""
 [[accounts]]
 id = "main"
 name = "主账号"
-profile = "Default"
 daily_limit = 150
 enabled = true
 role = "scraper"
@@ -232,7 +226,6 @@ role = "scraper"
 [[accounts]]
 id = "sub_1"
 name = "子账号1"
-profile = "Profile 1"
 daily_limit = 150
 enabled = true
 role = "dispatcher"

@@ -9,6 +9,7 @@ from typing import Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bzauto.config import get_config
+from bzauto.browser import get_browser_manager
 from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.flows.dispatch import DispatchFlow
 from bzauto.flows.scan import ScanFlow
@@ -18,7 +19,6 @@ from bzauto.flows.scrape_only import BossScrapeOnlyFlow
 from bzauto.notify import NotificationAggregator, format_task_lines, get_notifier
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
-from bzauto.server.tab_session import TabSession
 from bzauto.models_doc import AccountDoc
 from bzauto.storage import Storage
 from bzauto.task_runner import ScheduledTask, TaskRunner
@@ -44,7 +44,8 @@ class ScrapeTask(ScheduledTask):
         self._storage = storage
 
     async def execute(self) -> dict[str, Any]:
-        session = TabSession(account_id=self._account_id)
+        bm = get_browser_manager()
+        session = bm.get_session(self._account_id)
         page = BossJobListPage(session)
         flow = BossScrapeOnlyFlow(page, session, self._account_id, self._storage)
         cfg = get_config()
@@ -78,7 +79,8 @@ class DispatchTask(ScheduledTask):
         if pending_count < self._batch_size and is_scraper:
             await ScrapeTask(self._account_id, self._storage).execute()
 
-        session = TabSession(account_id=self._account_id)
+        bm = get_browser_manager()
+        session = bm.get_session(self._account_id)
         page = BossJobListPage(session)
         flow = DispatchFlow(page, session, self._account_id, self._storage)
         result = await flow.run(batch_size=min(remaining, self._batch_size))
@@ -93,7 +95,8 @@ class ScrapeChatTask(ScheduledTask):
         self._storage = storage
 
     async def execute(self) -> dict[str, Any]:
-        session = TabSession(account_id=self._account_id)
+        bm = get_browser_manager()
+        session = bm.get_session(self._account_id)
         page = BossChatListPage(session)
         flow = BossScrapeChatFlow(page, session, self._account_id, self._storage)
         return await flow.run(max_scrolls=10)
@@ -107,7 +110,8 @@ class DeleteChatTask(ScheduledTask):
         self._storage = storage
 
     async def execute(self) -> dict[str, Any]:
-        session = TabSession(account_id=self._account_id)
+        bm = get_browser_manager()
+        session = bm.get_session(self._account_id)
         page = BossChatListPage(session)
         flow = BossDeleteChatFlow(page, session, self._account_id, self._storage)
         return {"deleted": len(await flow.run(dry_run=False))}
@@ -121,7 +125,8 @@ class ScrapeAndChatTask(ScheduledTask):
         self._storage = storage
 
     async def execute(self) -> dict[str, Any]:
-        session = TabSession(account_id=self._account_id)
+        bm = get_browser_manager()
+        session = bm.get_session(self._account_id)
         page = BossJobListPage(session)
         flow = BossScrapeFlow(page, session, self._account_id, self._storage)
         jobs = await flow.run(max_scrolls=10)
@@ -136,7 +141,8 @@ class ScanTask(ScheduledTask):
         self._storage = storage
 
     async def execute(self) -> dict[str, Any]:
-        session = TabSession(account_id=self._account_id)
+        bm = get_browser_manager()
+        session = bm.get_session(self._account_id)
         flow = ScanFlow(session, self._account_id, self._storage)
         return await flow.run()
 

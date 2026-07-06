@@ -6,7 +6,7 @@
 
     async def main():
         async with PageAnalyzer() as pa:
-            await pa.scan("https://www.zhipin.com/")
+            await pa.connect("https://www.zhipin.com/")
             await pa.dump("li.job-card-box", limit=2)
             await pa.find_text("留在本页")
             b = await pa.bbox(".greet-boss-dialog .cancel-btn")
@@ -18,32 +18,35 @@ import asyncio
 import logging
 import sys
 
-from bzauto.server.tab_session import TabSession
-from bzauto.server.lifecycle import start_server, stop_server, ensure_tab
+import qasync
+
+from PySide6.QtWidgets import QApplication
+
+from bzauto.browser import BrowserManager, BrowserSession
+from bzauto.browser.manager import _set_browser_manager
 
 log = logging.getLogger("analyze")
 
 
 class PageAnalyzer:
-    """页面分析工具。"""
+    """页面分析工具 — 使用 BrowserSession 直接驱动。"""
 
-    def __init__(self, session: TabSession | None = None) -> None:
-        self._session = session or TabSession()
+    def __init__(self, session: BrowserSession | None = None) -> None:
+        self._session = session
+        self._manager: BrowserManager | None = None
 
     async def start(self) -> None:
-        await start_server()
-        log.info("等待扩展连接...")
-        registry = self._session.registry
-        while not registry.is_connected():
-            await asyncio.sleep(0.5)
-        log.info("扩展已连接，等待标签同步...")
-        while not registry.tabs:
-            await asyncio.sleep(0.3)
-        log.info("已同步 %d 个标签", len(registry.tabs))
-        await ensure_tab(self._session)
+        if self._session is not None:
+            return
+        accounts = [{"id": "main", "name": "main"}]
+        self._manager = BrowserManager(accounts)
+        _set_browser_manager(self._manager)
+        self._manager.show()
+        self._session = self._manager.get_session("main")
 
     async def stop(self) -> None:
-        await stop_server()
+        if self._manager:
+            self._manager.close()
 
     async def __aenter__(self) -> PageAnalyzer:
         await self.start()
@@ -53,36 +56,43 @@ class PageAnalyzer:
         await self.stop()
 
     async def connect(self, url: str | None = None) -> None:
-        await ensure_tab(self._session, url)
+        if url:
+            await self._session.ensure_tab(url, timeout=30.0)
+        else:
+            await self._session.ensure_tab()
 
     async def scan(self, url: str | None = None) -> None:
         await self.connect(url)
-        log.info("标签: %s", self._session.tab_id)
+        log.info("当前 URL: %s", self._session.current_url)
         await self.dump_common_elements()
 
     async def dump(self, selector: str, limit: int = 5) -> list[dict]:
-        raw = await self._session.query(select=selector, return_="raw")
-        if raw:
-            log.info("[%s] %d 个匹配:", selector, len(raw))
-            for i, r in enumerate(raw[:limit]):
-                log.info("  #%d: %s", i, r["html"])
+        items = await self._session.find_all(selector, project={"html": "@html", "text": "@text"})
+        if items:
+            log.info("[%s] %d 个匹配:", selector, len(items))
+            for i, r in enumerate(items[:limit]):
+                html = r.get("html", "")[:200]
+                log.info("  #%d: %s", i, html)
         else:
             log.info("[%s] 无匹配", selector)
-        return raw or []
+        return items
 
     async def find_text(
         self, text: str, selector: str = "*", limit: int = 5,
     ) -> list[dict]:
-        raw = await self._session.query(
-            select=selector, filter={"textContains": text}, return_="raw",
+        items = await self._session.find_all(
+            select=selector,
+            filter={"textContains": text},
+            project={"html": "@html", "text": "@text"},
         )
-        if raw:
-            log.info("「%s」找到 %d 个:", text, len(raw))
-            for i, r in enumerate(raw[:limit]):
-                log.info("  #%d: %s", i, r["html"])
+        if items:
+            log.info("「%s」找到 %d 个:", text, len(items))
+            for i, r in enumerate(items[:limit]):
+                html = r.get("html", "")[:200]
+                log.info("  #%d: %s", i, html)
         else:
             log.info("「%s」未找到", text)
-        return raw or []
+        return items
 
     async def bbox(self, selector: str, **filter_kw: object) -> dict | None:
         return await self._session.bbox(select=selector, filter=filter_kw or None)
@@ -104,14 +114,14 @@ class PageAnalyzer:
         ]
         for label, selectors in groups:
             for sel in selectors:
-                raw = await self._session.query(select=sel, return_="raw")
-                if raw:
-                    log.info("  [%s] %s: %d 个", label, sel, len(raw))
-                    for r in raw[:1]:
-                        log.info("    例: %s", r["html"][:200])
+                items = await self._session.find_all(sel, project={"html": "@html"})
+                if items:
+                    log.info("  [%s] %s: %d 个", label, sel, len(items))
+                    html = items[0].get("html", "")[:200]
+                    log.info("    例: %s", html)
 
     async def dump_visible_dialogs(self) -> list[dict]:
-        result = await self._session.execute("""
+        result = await self._session.eval_js("""
             (function() {
                 var all = document.querySelectorAll('[class*=\"dialog\"],[class*=\"modal\"],[class*=\"popup\"],.mask');
                 var visible = [];
@@ -137,32 +147,37 @@ class PageAnalyzer:
                 log.info("  <%s> class=%r rect=%s", r["tag"], r.get("cls", ""), r["rect"])
                 log.info("    %s", r["html"][:300])
         else:
-            log.info("无可见弹窗（或 CSP 拦截）")
+            log.info("无可见弹窗")
         return result or []
 
     async def snapshot(self) -> str:
-        result = await self._session.query(
-            select="body", return_="raw",
-        )
-        if result:
-            html = result[0].get("html", "")
+        html = await self._session.dump_html()
+        if html:
             for line in html.split("\n"):
                 log.info("  %s", line)
-            return html
-        return ""
-
-
-async def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    async with PageAnalyzer() as pa:
-        url = sys.argv[1] if len(sys.argv) > 1 else None
-        await pa.scan(url)
-        log.info("\n=== 输入任意关键词搜索 ===")
+        return html or ""
 
 
 def cli_main() -> None:
-    asyncio.run(main())
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+    app = QApplication(sys.argv)
+    loop = qasync.QEventLoop(app)
+    asyncio.set_event_loop(loop)
+
+    async def _main():
+        url = sys.argv[1] if len(sys.argv) > 1 else None
+        pa = PageAnalyzer()
+        await pa.start()
+        try:
+            await pa.scan(url)
+        finally:
+            await pa.stop()
+
+    loop.create_task(_main())
+    with loop:
+        loop.run_forever()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    cli_main()

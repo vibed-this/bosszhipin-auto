@@ -4,10 +4,10 @@ from __future__ import annotations
 import logging
 
 from bzauto.config import get_config
+from bzauto.browser.session import BrowserSession
 from bzauto.flows.base import BaseFlow
 from bzauto.models import JobCard
 from bzauto.pages.job_list import BossJobListPage
-from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.scrape_only")
@@ -16,7 +16,7 @@ log = logging.getLogger("flow.scrape_only")
 class BossScrapeOnlyFlow(BaseFlow[BossJobListPage]):
     """纯爬取流程编排：只收集职位数据，不执行沟通。"""
 
-    def __init__(self, page: BossJobListPage, session: TabSession, account_id: str = "main", storage: Storage | None = None) -> None:
+    def __init__(self, page: BossJobListPage, session: BrowserSession, account_id: str = "main", storage: Storage | None = None) -> None:
         super().__init__(page, session, account_id)
         self._storage = storage
         cfg = get_config()

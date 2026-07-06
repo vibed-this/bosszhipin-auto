@@ -6,10 +6,10 @@ import logging
 import random
 
 from bzauto.config import get_config
+from bzauto.browser.session import BrowserSession
 from bzauto.flows.base import BaseFlow
 from bzauto.models import JobCard, make_job_id
 from bzauto.pages.job_list import BossJobListPage
-from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.scrape")
@@ -18,7 +18,7 @@ log = logging.getLogger("flow.scrape")
 class BossScrapeFlow(BaseFlow[BossJobListPage]):
     """爬取 + 沟通流程编排。"""
 
-    def __init__(self, page: BossJobListPage, session: TabSession, account_id: str = "main", storage: Storage | None = None) -> None:
+    def __init__(self, page: BossJobListPage, session: BrowserSession, account_id: str = "main", storage: Storage | None = None) -> None:
         super().__init__(page, session, account_id)
         self._storage = storage
         cfg = get_config()

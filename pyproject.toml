@@ -4,23 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "bzauto"
-version = "0.1.0"
-description = "Boss直聘远程控制 — Chrome 扩展 + Python 服务，支持 JS 远程执行"
+version = "0.2.0"
+description = "Boss直聘自动化 — QWebEngineView 桌面浏览器控制"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.34.0",
-    "pyautogui>=0.9.54",
     "keyboard>=0.13.5",
     "pyside6>=6.6.0",
-    "python-socketio>=5.11.0",
     "tinydb>=4.8.0",
     "apscheduler>=3.10.0",
     "httpx>=0.27.0",
     "tomli_w>=1.0.0",
     "pydantic>=2.13.4",
-    "beautifulsoup4>=4.15.0",
+    "qasync>=0.27.0",
 ]
 
 [project.scripts]
@@ -35,3 +31,6 @@ warn_return_any = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+bzauto = ["py.typed"]

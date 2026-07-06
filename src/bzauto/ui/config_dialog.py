@@ -130,8 +130,8 @@ class ConfigDialog(QDialog):
 
     def _build_accounts_tab(self):
         layout = QVBoxLayout(self._tab_accounts)
-        self._table_accounts = QTableWidget(0, 6)
-        self._table_accounts.setHorizontalHeaderLabels(["ID", "名称", "Profile", "每日上限", "启用", "角色"])
+        self._table_accounts = QTableWidget(0, 5)
+        self._table_accounts.setHorizontalHeaderLabels(["ID", "名称", "每日上限", "启用", "角色"])
         self._table_accounts.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self._table_accounts)
 
@@ -160,16 +160,15 @@ class ConfigDialog(QDialog):
         for i, acc in enumerate(self._cfg.accounts):
             table.setItem(i, 0, QTableWidgetItem(acc.id))
             table.setItem(i, 1, QTableWidgetItem(acc.name))
-            table.setItem(i, 2, QTableWidgetItem(acc.profile))
             item = QTableWidgetItem(str(acc.daily_limit))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 3, item)
+            table.setItem(i, 2, item)
             enabled_item = QTableWidgetItem("是" if acc.enabled else "否")
             enabled_item.setFlags(enabled_item.flags() | Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 4, enabled_item)
+            table.setItem(i, 3, enabled_item)
             role_item = QTableWidgetItem(acc.role)
             role_item.setFlags(role_item.flags() | Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 5, role_item)
+            table.setItem(i, 4, role_item)
 
     def _collect_config(self) -> AppConfig:
         cfg = self._cfg

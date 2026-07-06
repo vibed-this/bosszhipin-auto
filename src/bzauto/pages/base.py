@@ -1,23 +1,22 @@
-"""所有 page object 的基类：提供 is_loaded / wait_loaded / click_element 通用实现。"""
+"""所有 page object 的基类：提供 is_loaded / wait_loaded 通用实现。"""
 from __future__ import annotations
 
 import asyncio
 import time
 
-from bzauto.server.tab_session import TabSession
+from bzauto.browser.session import BrowserSession
 
 
 class BasePage:
-    """所有 page object 的基类：提供 is_loaded / wait_loaded / click_element 通用实现。"""
+    """所有 page object 的基类：提供 is_loaded / wait_loaded 通用实现。"""
 
     _LOADED_SELECTOR: str  # 子类覆盖，用于 count 判断
 
-    def __init__(self, session: TabSession) -> None:
+    def __init__(self, session: BrowserSession) -> None:
         self._session = session
 
     async def _count(self, selector: str) -> int:
-        r = await self._session.query(select=selector, return_="count")
-        return int(r) if r else 0
+        return await self._session.count(select=selector)
 
     async def is_loaded(self) -> bool:
         return await self._count(self._LOADED_SELECTOR) > 0

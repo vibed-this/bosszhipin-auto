@@ -5,10 +5,9 @@ import asyncio
 import logging
 import random
 
+from bzauto.browser.session import BrowserSession
 from bzauto.flows.base import BaseFlow
 from bzauto.pages.job_list import BossJobListPage
-from bzauto.server.lifecycle import ensure_tab
-from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.dispatch")
@@ -17,7 +16,7 @@ log = logging.getLogger("flow.dispatch")
 class DispatchFlow(BaseFlow[BossJobListPage]):
     """从 DB pending 池取 job 并按 href 定位卡片进行沟通。"""
 
-    def __init__(self, page: BossJobListPage, session: TabSession, account_id: str, storage: Storage) -> None:
+    def __init__(self, page: BossJobListPage, session: BrowserSession, account_id: str, storage: Storage) -> None:
         super().__init__(page, session, account_id)
         self._storage = storage
         self._jobs_url = "https://www.zhipin.com/web/geek/jobs"
@@ -46,10 +45,7 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 continue
 
             try:
-                await ensure_tab(
-                    self._session, self._jobs_url, reuse_existing=True, account_id=self._account_id,
-                )
-                await self._session.activate()
+                await self._session.ensure_tab(self._jobs_url, reuse_existing=True)
 
                 idx = await self._page.find_card_by_href(job.href)
                 if idx < 0:

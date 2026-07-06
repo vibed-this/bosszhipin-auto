@@ -1,28 +1,24 @@
+"""Qt 桌面 UI：主窗口(QTabWidget 多账号浏览器) + 浮动面板 + qasync 引导。"""
+
 from __future__ import annotations
 
 import asyncio
 import datetime
-import json
 import logging
 import os
 import sys
-import threading
-import time
 import traceback
-from pathlib import Path
-from typing import Any
 
 import keyboard
+import qasync
 
 from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtWidgets import QApplication
 
-from bzauto.ui.control_panel import ControlPanel
-from bzauto.ui.log_window import LogWindow
-from bzauto.ui.config_dialog import ConfigDialog
-from bzauto.ui.data_window import DataWindow
+from bzauto.browser import BrowserManager, get_browser_manager
+from bzauto.browser.manager import _set_browser_manager
+from bzauto.config import get_config
 from bzauto.notify import format_task_lines, get_notifier
-from bzauto.server.lifecycle import start_server, get_registry
 from bzauto.storage import Storage
 from bzauto.task_runner import ScheduledTask, TaskRunner
 from bzauto.scheduler import (
@@ -34,6 +30,10 @@ from bzauto.scheduler import (
     ScrapeTask,
     ScrapeAndChatTask,
 )
+from bzauto.ui.control_panel import ControlPanel
+from bzauto.ui.log_window import LogWindow
+from bzauto.ui.config_dialog import ConfigDialog
+from bzauto.ui.data_window import DataWindow
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -45,73 +45,50 @@ log = logging.getLogger("boss.ui")
 
 
 class _TaskBridge(QObject):
-    """跨线程信号桥：后台线程 → Qt 主线程。"""
+    """信号桥（同一线程内，保留以防后续需要跨组件通知）。"""
 
     buttons_enabled = Signal(bool)
     data_updated = Signal()
-    stop_requested = Signal()                # 全局快捷键触发停止
+    stop_requested = Signal()
 
     # debug 窗口信号
-    debug_result = Signal(str, str, float)   # task_name, result_text, elapsed
-    debug_error = Signal(str, str)           # task_name, error_text
-    debug_running = Signal(bool)             # running state
+    debug_result = Signal(str, str, float)
+    debug_error = Signal(str, str)
+    debug_running = Signal(bool)
 
 
 class BzAutoApp:
-    """主应用控制器：单一后台线程 + event loop + 任务管理。"""
+    """主应用控制器：qasync 单线程 + BrowserManager + TaskRunner + Scheduler。"""
 
     def __init__(self) -> None:
         self._app = QApplication(sys.argv)
         self._app.setQuitOnLastWindowClosed(True)
 
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._storage = Storage()
+        self._cfg = get_config()
+
+        # 主窗口 — BrowserManager（QTabWidget 多账号浏览器）
+        accounts_list = [
+            {"id": a.id, "name": a.name} for a in self._cfg.accounts if a.enabled
+        ]
+        self._manager = BrowserManager(accounts_list)
+        _set_browser_manager(self._manager)
+
         self._control = ControlPanel()
         self._log_win = LogWindow()
         self._data_win: DataWindow | None = None
         self._debug_win: DebugWindow | None = None
+
         self._bridge = _TaskBridge()
 
-        # 后台线程 + event loop（所有异步操作在此执行）
-        self._loop: asyncio.AbstractEventLoop | None = None
-        self._thread: threading.Thread | None = None
-        self._ready = threading.Event()
-        self._start_bg_thread()
-
         # 任务状态
-        self._current_task: asyncio.Future | None = None
         self._task_runner: TaskRunner | None = None
         self._scheduler: BzScheduler | None = None
+        self._current_task: asyncio.Task | None = None
         self._config_dlg: ConfigDialog | None = None
 
         self._setup_ui()
-
-    def _start_bg_thread(self) -> None:
-        """启动单一后台线程和 event loop。"""
-        self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._run_bg_loop, daemon=True)
-        self._thread.start()
-
-    def _run_bg_loop(self) -> None:
-        """后台线程入口：运行 event loop。"""
-        asyncio.set_event_loop(self._loop)
-        # TaskRunner/Scheduler 在 loop running 后初始化（asyncio.Queue 需要 running loop）
-        self._loop.call_soon(self._init_runner)
-        self._loop.run_forever()
-
-    def _init_runner(self) -> None:
-        """loop 运行后的首次回调：初始化 TaskRunner、Scheduler、启动服务器。"""
-        self._task_runner = TaskRunner(self._loop)
-        self._scheduler = BzScheduler(self._task_runner, self._loop, self._storage)
-        self._ready.set()
-        asyncio.create_task(self._init_scheduler())
-
-    async def _init_scheduler(self) -> None:
-        """启动时恢复 + 启动调度器。"""
-        await start_server()
-        self._storage.release_stale_claims()
-        self._storage.reset_daily_counts_if_new_day()
-        self._scheduler.start()
-        log.info("系统启动完成: 调度器已运行")
 
     def _setup_ui(self) -> None:
         """配置 UI 布局和信号。"""
@@ -119,24 +96,31 @@ class BzAutoApp:
         margin = 20
         gap = 50
 
-        self._log_win.move(
-            sg.width() - self._log_win.width() - margin,
-            sg.height() - self._log_win.height() - margin,
-        )
+        self._manager.show()
+        self._manager.move(0, 0)
+
         self._control.move(
             sg.width() - self._control.width() - margin,
-            self._log_win.y() - self._control.height() - gap,
+            margin,
+        )
+        self._log_win.move(
+            sg.width() - self._log_win.width() - margin,
+            margin + self._control.height() + gap,
         )
 
-        # 跨线程信号连接
+        # 跨线程信号连接（实际同线程，保留 Signal 接口）
         self._bridge.buttons_enabled.connect(self._control.set_buttons_enabled)
         self._bridge.data_updated.connect(self._on_data_updated)
         self._bridge.stop_requested.connect(self._on_stop)
 
-        # 全局快捷键
+        # 全局快捷键 — 通过 run_coroutine_threadsafe 投递到 qasync 循环
         keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
-        keyboard.add_hotkey("ctrl+w", lambda: self._bridge.stop_requested.emit())
-        log.info("按 Ctrl+E 强制退出 | Ctrl+W 停止任务")
+        keyboard.add_hotkey(
+            "ctrl+w",
+            lambda: asyncio.run_coroutine_threadsafe(
+                self._async_stop(), self._loop,
+            ).result() if self._loop else None,
+        )
 
         # 连接按钮信号
         self._control.btn_scrape_chat.clicked.connect(lambda: self._on_scrape_chat())
@@ -147,6 +131,10 @@ class BzAutoApp:
         self._control.btn_config.clicked.connect(self._on_open_config)
         self._control.btn_data.clicked.connect(self._on_open_data)
         self._control.btn_debug.clicked.connect(self._on_open_debug)
+
+    async def _async_stop(self) -> None:
+        """协程版停止（被 keyboard 线程调用）。"""
+        self._on_stop()
 
     def _on_open_config(self) -> None:
         self._config_dlg = ConfigDialog(self._control)
@@ -205,14 +193,9 @@ class BzAutoApp:
             log.info("当前任务已取消")
         self._bridge.buttons_enabled.emit(True)
 
-    # ── 任务管理：全部走 TaskRunner 队列 ──
+    # ── 任务管理 ──
 
     def _submit(self, task: ScheduledTask) -> None:
-        """提交 ScheduledTask 到 TaskRunner，完成后发送通知。"""
-        if not self._ready.wait(timeout=10):
-            log.error("系统未就绪，无法启动任务")
-            return
-
         if self._current_task is not None and not self._current_task.done():
             log.warning("已有任务在运行，请等待完成")
             return
@@ -220,17 +203,15 @@ class BzAutoApp:
         self._bridge.buttons_enabled.emit(False)
         log.info("开始 %s...", task.name)
 
-        self._current_task = asyncio.run_coroutine_threadsafe(
+        assert self._loop is not None
+        self._current_task = self._loop.create_task(
             self._run_and_notify(task),
-            self._loop,
         )
         self._current_task.add_done_callback(self._on_task_done)
 
-    async def _run_and_notify(self, task: ScheduledTask) -> Any:
-        """在后台执行 ScheduledTask 并通过 TaskRunner 排队，完成后通知。"""
+    async def _run_and_notify(self, task: ScheduledTask) -> dict:
+        """执行 ScheduledTask 并通过 TaskRunner 排队，完成后通知。"""
         try:
-            await start_server()
-            # 等待 _task_runner 就绪（防御性，防止极罕见的竞态）
             while self._task_runner is None:
                 await asyncio.sleep(0.05)
             result = await self._task_runner.submit_and_wait(task)
@@ -247,7 +228,6 @@ class BzAutoApp:
             raise
 
     def _on_task_done(self, future: asyncio.Future) -> None:
-        """任务完成回调：恢复按钮状态。"""
         if future.cancelled():
             log.info("任务已取消")
         elif future.exception():
@@ -260,7 +240,6 @@ class BzAutoApp:
 
     def run_debug_task(self, task_name: str, account_id: str,
                        via_runner: bool, timeout: float = 120) -> None:
-        """创建 ScheduledTask，选择执行路径，带超时保护。"""
         if self._current_task is not None and not self._current_task.done():
             log.warning("已有任务在运行，请等待完成")
             return
@@ -268,23 +247,22 @@ class BzAutoApp:
         self._bridge.buttons_enabled.emit(False)
         log.info("开始 Debug %s (account=%s, via_runner=%s, timeout=%s)",
                  task_name, account_id, via_runner, timeout)
-        self._current_task = asyncio.run_coroutine_threadsafe(
+        assert self._loop is not None
+        self._current_task = self._loop.create_task(
             self._run_debug_async(task_name, account_id, via_runner, timeout),
-            self._loop,
         )
         self._current_task.add_done_callback(self._on_debug_done)
 
     def run_debug_trigger(self, trigger_name: str, timeout: float = 300) -> None:
-        """调用 scheduler._trigger_* 完整方法，带超时保护。"""
         if self._current_task is not None and not self._current_task.done():
             log.warning("已有任务在运行，请等待完成")
             return
         self._bridge.debug_running.emit(True)
         self._bridge.buttons_enabled.emit(False)
         log.info("开始 Debug 触发%s (timeout=%s)", trigger_name, timeout)
-        self._current_task = asyncio.run_coroutine_threadsafe(
+        assert self._loop is not None
+        self._current_task = self._loop.create_task(
             self._run_debug_trigger_async(trigger_name, timeout),
-            self._loop,
         )
         self._current_task.add_done_callback(self._on_debug_done)
 
@@ -301,13 +279,15 @@ class BzAutoApp:
         else:
             lines.append("调度器未运行")
         try:
-            connected = get_registry().get_connected_accounts()
-            if connected:
-                lines.append(f"\n已连接账号: {', '.join(connected)}")
-            else:
-                lines.append("\n已连接账号: 无")
+            bm = get_browser_manager()
+            if bm:
+                connected = bm.connected_accounts()
+                if connected:
+                    lines.append(f"\n已加载账号: {', '.join(connected)}")
+                else:
+                    lines.append("\n已加载账号: 无")
         except Exception:
-            lines.append("\n已连接账号: 获取失败")
+            lines.append("\n已加载账号: 获取失败")
         for acc in self._storage.get_enabled_accounts():
             remaining = self._storage.get_remaining_quota(acc.account_id)
             lines.append(f"  {acc.name or acc.account_id}: 剩余 {remaining}")
@@ -330,9 +310,9 @@ class BzAutoApp:
 
     async def _run_debug_async(self, task_name: str, account_id: str,
                                via_runner: bool, timeout: float) -> None:
+        import time
         start = time.monotonic()
         try:
-            await start_server()
             task = self._create_debug_task(task_name, account_id, self._storage)
 
             if via_runner:
@@ -360,9 +340,9 @@ class BzAutoApp:
             self._bridge.debug_error.emit(task_name, traceback.format_exc())
 
     async def _run_debug_trigger_async(self, trigger_name: str, timeout: float) -> None:
+        import time
         start = time.monotonic()
         try:
-            await start_server()
             trigger_map = {
                 "采集": self._scheduler._trigger_scrape,
                 "投递": self._scheduler._trigger_dispatch,
@@ -380,15 +360,35 @@ class BzAutoApp:
             self._bridge.debug_error.emit(trigger_name, traceback.format_exc())
 
     def _on_debug_done(self, future: asyncio.Future) -> None:
-        """Debug 任务完成回调：恢复按钮状态（异常已在协程内处理）。"""
         self._bridge.debug_running.emit(False)
         self._bridge.buttons_enabled.emit(True)
 
+    # ── 异步初始化 ──
+
+    async def _init_async(self) -> None:
+        """qasync 循环启动后回调：初始化 TaskRunner、Scheduler。"""
+        self._task_runner = TaskRunner(self._loop)
+        self._scheduler = BzScheduler(self._task_runner, self._loop, self._storage)
+
+        # 启动时维护
+        self._storage.release_stale_claims()
+        self._storage.reset_daily_counts_if_new_day()
+        self._scheduler.start()
+        log.info("系统启动完成: 调度器已运行")
+
     def run(self) -> None:
-        """启动应用。"""
+        """启动应用（阻塞直至退出）。"""
         self._log_win.show()
         self._control.show()
-        sys.exit(self._app.exec())
+
+        loop = qasync.QEventLoop(self._app)
+        self._loop = loop
+        asyncio.set_event_loop(loop)
+
+        loop.create_task(self._init_async())
+
+        with loop:
+            loop.run_forever()
 
 
 def run_ui() -> None:

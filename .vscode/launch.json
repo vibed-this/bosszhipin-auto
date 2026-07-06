@@ -2,15 +2,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "boss-server",
+            "name": "boss-ui",
             "type": "debugpy",
             "request": "launch",
-            "module": "bzauto",
+            "module": "bzauto.ui",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "env": {
-                "PYTHONUNBUFFERED": "1"
-            }
+            "env": { "PYTHONUNBUFFERED": "1" }
         },
         {
             "name": "boss-analyze",
@@ -18,9 +16,7 @@
             "request": "launch",
             "module": "bzauto.analyze",
             "console": "integratedTerminal",
-            "args": [
-                "https://www.zhipin.com/web/geek/jobs"
-            ],
+            "args": ["https://www.zhipin.com/web/geek/jobs"],
             "justMyCode": true
         },
         {
@@ -29,17 +25,7 @@
             "request": "launch",
             "module": "bzauto.scrape_jobs",
             "console": "integratedTerminal",
-            "args": [
-                "https://www.zhipin.com/web/geek/jobs"
-            ],
-            "justMyCode": true
-        },
-        {
-            "name": "boss-ui",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "bzauto.ui",
-            "console": "integratedTerminal",
+            "args": ["https://www.zhipin.com/web/geek/jobs"],
             "justMyCode": true
         },
         {
@@ -49,14 +35,6 @@
             "module": "bzauto.scrape_chat_auto",
             "console": "integratedTerminal",
             "args": [],
-            "justMyCode": true
-        },
-        {
-            "name": "boss-delete-chat",
-            "type": "debugpy",
-            "request": "launch",
-            "module": "bzauto.flows.delete_chat",
-            "console": "integratedTerminal",
             "justMyCode": true
         },
         {

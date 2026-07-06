@@ -1,6 +1,5 @@
-[server]
-host = "127.0.0.1"
-port = 8765
+[browser]
+profiles_dir = "profiles"
 
 [storage]
 db_path = "data/bzauto.tinydb"
@@ -59,7 +58,6 @@ token = "12345678"
 [[accounts]]
 id = "main"
 name = "主账号"
-profile = "Default"
 daily_limit = 150
 enabled = true
 role = "scraper"
@@ -67,7 +65,6 @@ role = "scraper"
 [[accounts]]
 id = "sub_1"
 name = "子账号1"
-profile = "Profile 1"
 daily_limit = 150
 enabled = true
 role = "dispatcher"

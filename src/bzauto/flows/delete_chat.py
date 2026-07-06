@@ -6,11 +6,11 @@ import logging
 import random
 
 from bzauto.config import get_config
+from bzauto.browser.session import BrowserSession
 from bzauto.flows.base import BaseFlow
 from bzauto.enums import MsgType
 from bzauto.models import ChatItem, classify_msg_type
 from bzauto.pages.chat_list import BossChatListPage
-from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.delete_chat")
@@ -46,7 +46,7 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
     2. 关键词 fallback：页面上有新拒信时关键词匹配删除
     """
 
-    def __init__(self, page: BossChatListPage, session: TabSession, account_id: str = "main", storage: Storage | None = None) -> None:
+    def __init__(self, page: BossChatListPage, session: BrowserSession, account_id: str = "main", storage: Storage | None = None) -> None:
         super().__init__(page, session, account_id)
         self._storage = storage
         self._keywords = get_config().delete.keywords

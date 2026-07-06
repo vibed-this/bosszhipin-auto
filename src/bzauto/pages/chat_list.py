@@ -6,9 +6,9 @@ import logging
 import random
 from typing import AsyncIterator
 
+from bzauto.browser.session import BrowserSession
 from bzauto.models import ChatItem
 from bzauto.pages.base import BasePage
-from bzauto.server.tab_session import TabSession
 
 log = logging.getLogger("page.chat_list")
 
@@ -53,8 +53,9 @@ class BossChatListPage(BasePage):
 
     _LOADED_SELECTOR = "li[role='listitem']"
 
-    def __init__(self, session: TabSession) -> None:
+    def __init__(self, session: BrowserSession) -> None:
         super().__init__(session)
+        self._session: BrowserSession = session
 
     async def get_chat_items(
         self,
@@ -63,25 +64,23 @@ class BossChatListPage(BasePage):
         include_status: bool = False,
     ) -> list[ChatItem]:
         project = _CHAT_PROJECT_WITH_STATUS if include_status else _CHAT_PROJECT
-        raw = await self._session.query(
+        raw = await self._session.find_all(
             select=_LIST_ITEM,
             project=project,
-            return_="list",
         )
         if not raw:
             return []
         return [ChatItem.from_query_row(item) for item in raw[:limit]]
 
     async def get_chat_item_at(self, index: int) -> ChatItem | None:
-        raw = await self._session.query(
+        raw = await self._session.find_one(
             select=_LIST_ITEM,
             filter={"index": index},
             project=_CHAT_PROJECT_WITH_STATUS,
-            return_="list",
         )
         if not raw:
             return None
-        return ChatItem.from_query_row(raw[0])
+        return ChatItem.from_query_row(raw)
 
     async def iter_chat_items(
         self, *, max_scrolls: int = 0
@@ -108,25 +107,22 @@ class BossChatListPage(BasePage):
         return bool(url and "zhipin.com" in url and "chat" in url)
 
     async def get_labels(self) -> list[str]:
-        raw = await self._session.query(
-            select=_LABEL_LIST, return_="raw",
+        items = await self._session.find_all(
+            select=_LABEL_LIST,
+            project={"text": "@text"},
         )
-        if not raw:
-            return []
-        return [r.get("text", "").strip() for r in raw]
+        return [item["text"].strip() for item in items]
 
     async def has_more(self) -> bool:
-        raw = await self._session.query(
-            select=_FOOTER, return_="raw",
-        )
-        return bool(raw)
+        return await self._session.count(_FOOTER) > 0
 
     async def get_no_data_text(self) -> str | None:
-        raw = await self._session.query(
-            select=_CHAT_NO_DATA, return_="raw",
+        items = await self._session.find_all(
+            select=_CHAT_NO_DATA,
+            project={"text": "@text"},
         )
-        if raw:
-            return raw[0].get("text", "")
+        if items:
+            return items[0].get("text")
         return None
 
     async def click_chat_item(self, index: int = 0) -> None:

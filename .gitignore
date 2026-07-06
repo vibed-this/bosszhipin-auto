@@ -224,3 +224,6 @@ node_modules/
 
 # Runtime data (TinyDB database)
 data/
+
+# Browser profiles (QWebEngineProfile per account, generated at runtime)
+profiles/

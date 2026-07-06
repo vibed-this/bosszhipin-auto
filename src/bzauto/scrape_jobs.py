@@ -1,16 +1,8 @@
-"""BOSS直聘自动化抓取
+"""BOSS直聘自动化抓取 — QWebEngineView 模式。
 
 用法::
 
-    import asyncio
-    from bzauto.scrape_jobs import BossJobsAuto
-
-    async def main():
-        async with BossJobsAuto() as auto:
-            jobs = await auto.run("https://www.zhipin.com/...")
-            print(f"抓取到 {len(jobs)} 条职位")
-
-    asyncio.run(main())
+    boss-scrape [url]
 """
 
 from __future__ import annotations
@@ -21,11 +13,14 @@ import os
 import sys
 
 import keyboard
+import qasync
 
+from PySide6.QtWidgets import QApplication
+
+from bzauto.browser import BrowserManager
+from bzauto.browser.manager import _set_browser_manager
 from bzauto.config import get_config
 from bzauto.models import JobCard
-from bzauto.server.tab_session import TabSession
-from bzauto.server.lifecycle import start_server, stop_server
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.flows.scrape import BossScrapeFlow
 from bzauto.storage import Storage
@@ -34,24 +29,12 @@ log = logging.getLogger("boss.main")
 
 
 class BossJobsAuto:
-    """Boss直聘自动化入口（组合模式）。"""
+    """Boss直聘自动化入口（最小 Qt 引导，无控制面板）。"""
 
-    def __init__(
-        self,
-        session: TabSession | None = None,
-        *,
-        host: str | None = None,
-        port: int | None = None,
-        account_id: str = "main",
-        storage: Storage | None = None,
-    ) -> None:
-        cfg = get_config()
-        self._host = host or cfg.server.host
-        self._port = port or cfg.server.port
-        self._storage = storage
-        self.session = session or TabSession(account_id=account_id)
-        self.page = BossJobListPage(self.session)
-        self.flow = BossScrapeFlow(self.page, self.session, account_id, storage)
+    def __init__(self, account_id: str = "main") -> None:
+        self._account_id = account_id
+        self._cfg = get_config()
+        self._storage = Storage()
 
     async def run(
         self,
@@ -59,14 +42,19 @@ class BossJobsAuto:
         max_scrolls: int = 10,
         reuse_existing: bool = False,
     ) -> list[JobCard]:
-        return await self.flow.run(url, max_scrolls=max_scrolls, reuse_existing=reuse_existing)
+        accounts = [{"id": self._account_id, "name": self._account_id}]
+        manager = BrowserManager(accounts)
+        _set_browser_manager(manager)
+        manager.show()
 
-    async def __aenter__(self) -> BossJobsAuto:
-        await start_server(self._host, self._port)
-        return self
+        session = manager.get_session(self._account_id)
+        page = BossJobListPage(session)
+        flow = BossScrapeFlow(page, session, self._account_id, self._storage)
 
-    async def __aexit__(self, *args: object) -> None:
-        await stop_server()
+        result = await flow.run(url, max_scrolls=max_scrolls, reuse_existing=reuse_existing)
+
+        manager.close()
+        return result
 
 
 def cli_main() -> None:
@@ -75,13 +63,19 @@ def cli_main() -> None:
 
     keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
 
+    app = QApplication(sys.argv)
+    loop = qasync.QEventLoop(app)
+    asyncio.set_event_loop(loop)
+
     async def _main():
         url = sys.argv[1] if len(sys.argv) > 1 else "https://www.zhipin.com/web/geek/jobs"
-        async with BossJobsAuto() as auto:
-            jobs = await auto.run(url, reuse_existing=True)
-            print(f"抓取到 {len(jobs)} 条职位")
+        auto = BossJobsAuto()
+        jobs = await auto.run(url, reuse_existing=True)
+        print(f"抓取到 {len(jobs)} 条职位")
 
-    asyncio.run(_main())
+    loop.create_task(_main())
+    with loop:
+        loop.run_forever()
 
 
 if __name__ == "__main__":

@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import logging
 
+from bzauto.browser.session import BrowserSession
 from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.pages.chat_list import BossChatListPage
-from bzauto.server.lifecycle import ensure_tab
-from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.scan")
@@ -16,7 +15,7 @@ log = logging.getLogger("flow.scan")
 class ScanFlow:
     """编排扫描任务的完整流程。"""
 
-    def __init__(self, session: TabSession, account_id: str, storage: Storage) -> None:
+    def __init__(self, session: BrowserSession, account_id: str, storage: Storage) -> None:
         self.session = session
         self._account_id = account_id
         self._storage = storage
@@ -27,8 +26,7 @@ class ScanFlow:
     async def run(self) -> dict:
         url = "https://www.zhipin.com/web/geek/chat"
 
-        await ensure_tab(self.session, url, reuse_existing=True, account_id=self._account_id)
-        await self.session.activate()
+        await self.session.ensure_tab(url, reuse_existing=True)
 
         result = await self.scrape_flow.run(max_scrolls=10)
         deleted = await self.delete_flow.run(dry_run=False)

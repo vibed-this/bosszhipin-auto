@@ -7,11 +7,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from bzauto.browser.session import BrowserSession
 from bzauto.enums import ConvStatus, MsgType
 from bzauto.flows.base import BaseFlow
 from bzauto.models import ChatItem, classify_msg_type
 from bzauto.pages.chat_list import BossChatListPage, _CHAT_URL
-from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.scrape_chat")
@@ -31,7 +31,7 @@ def infer_status(sender: str, unread_count: int, old_status: str) -> str:
 class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
     """聊天列表爬取流程编排。"""
 
-    def __init__(self, page: BossChatListPage, session: TabSession, account_id: str = "main", storage: Storage | None = None) -> None:
+    def __init__(self, page: BossChatListPage, session: BrowserSession, account_id: str = "main", storage: Storage | None = None) -> None:
         super().__init__(page, session, account_id)
         self._storage = storage
         self._chat_url = _CHAT_URL
