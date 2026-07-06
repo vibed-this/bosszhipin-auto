@@ -240,10 +240,7 @@ class RemoteSession:
             if "__error__" in result and result["__error__"]:
                 raise RuntimeError(f"查询失败: {result['__error__']}")
             if "data" in result:
-                data_result = result["data"]
-                data_str = str(data_result) if data_result else "None"
-                logger.debug("查询结果: %s", data_str[:200] if len(data_str) > 200 else data_str)
-                return data_result
+                return result["data"]
         return result
 
     async def bbox(
