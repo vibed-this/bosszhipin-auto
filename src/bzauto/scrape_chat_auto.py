@@ -8,7 +8,7 @@
     async def main():
         async with BossChatAuto() as auto:
             data = await auto.run(max_scrolls=2)
-            print(f"抓取到 {len(data)} 条聊天记录")
+            print(f"抓取到 {len(data.get('items', []))} 条聊天记录")
 
     asyncio.run(main())
 """
@@ -19,11 +19,11 @@ import asyncio
 import logging
 import os
 import sys
+from typing import Any
 
 import keyboard
 
 from bzauto.config import get_config
-from bzauto.models import ChatItem
 from bzauto.server.tab_session import TabSession
 from bzauto.server.lifecycle import start_server, stop_server
 from bzauto.pages.chat_list import BossChatListPage
@@ -56,7 +56,7 @@ class BossChatAuto:
         *,
         max_scrolls: int = 0,
         output: str | None = None,
-    ) -> list[ChatItem]:
+    ) -> dict[str, Any]:
         return await self.flow.run(url, max_scrolls=max_scrolls, output=output)
 
     async def __aenter__(self) -> BossChatAuto:
@@ -78,7 +78,8 @@ def cli_main() -> None:
         output = sys.argv[2] if len(sys.argv) > 2 else None
         async with BossChatAuto() as auto:
             data = await auto.run(url, max_scrolls=2, output=output)
-            print(f"抓取到 {len(data)} 条聊天记录")
+            items = data.get("items", [])
+            print(f"抓取到 {len(items)} 条聊天记录 (新增 {data.get('new', 0)}, 拒信 {len(data.get('rejections', []))})")
 
     asyncio.run(_main())
 

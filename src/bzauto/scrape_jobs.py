@@ -28,6 +28,7 @@ from bzauto.server.tab_session import TabSession
 from bzauto.server.lifecycle import start_server, stop_server
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.flows.scrape import BossScrapeFlow
+from bzauto.storage import Storage
 
 log = logging.getLogger("boss.main")
 
@@ -42,13 +43,15 @@ class BossJobsAuto:
         host: str | None = None,
         port: int | None = None,
         account_id: str = "main",
+        storage: Storage | None = None,
     ) -> None:
         cfg = get_config()
         self._host = host or cfg.server.host
         self._port = port or cfg.server.port
+        self._storage = storage
         self.session = session or TabSession(account_id=account_id)
         self.page = BossJobListPage(self.session)
-        self.flow = BossScrapeFlow(self.page, self.session, account_id)
+        self.flow = BossScrapeFlow(self.page, self.session, account_id, storage)
 
     async def run(
         self,

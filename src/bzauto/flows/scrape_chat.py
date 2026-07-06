@@ -11,7 +11,7 @@ from bzauto.config import get_config
 from bzauto.enums import ConvStatus
 from bzauto.flows.base import BaseFlow
 from bzauto.models import ChatItem
-from bzauto.pages.chat_list import BossChatListPage
+from bzauto.pages.chat_list import BossChatListPage, _CHAT_URL
 from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
 
@@ -37,7 +37,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
     def __init__(self, page: BossChatListPage, session: TabSession, account_id: str = "main", storage: Storage | None = None) -> None:
         super().__init__(page, session, account_id)
         self._storage = storage
-        self._chat_url = get_config().scrape.chat_url
+        self._chat_url = _CHAT_URL
 
     async def run(
         self,
@@ -59,14 +59,6 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
 
         log.info("爬取完成: 共 %d 条聊天记录", len(all_items))
 
-        if output:
-            path = Path(output)
-            path.write_text(
-                json.dumps([asdict(i) for i in all_items], ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            log.info("数据已保存到 %s", path)
-
         if self._storage is None:
             return {"items": all_items, "new": 0, "updated": 0, "rejections": [], "unread": []}
 
@@ -76,25 +68,23 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         rejections: list[str] = []
         unread: list[str] = []
 
-        seen_conv_ids: set[str] = set()
+        # 构建已有对话查找表 (conv_id, account) → status
+        existing_all = storage.get_conversations("", "")
+        existing_map: dict[tuple[str, str], str] = {
+            (c.get("conv_id", ""), c.get("account", "")): c.get("status", ConvStatus.NEW)
+            for c in existing_all
+        }
 
         for item in all_items:
             conv_dict = item.to_db_dict(self._account_id)
             conv_id = conv_dict["conv_id"]
-            seen_conv_ids.add(conv_id)
-
-            existing = storage.get_conversations("", "")
 
             is_new = storage.upsert_conversation(conv_dict)
             if is_new:
                 new_count += 1
                 old_status = ConvStatus.NEW
             else:
-                old_status = ConvStatus.NEW
-                for conv in existing:
-                    if conv.get("conv_id") == conv_id and conv.get("account") == self._account_id:
-                        old_status = conv.get("status", ConvStatus.NEW)
-                        break
+                old_status = existing_map.get((conv_id, self._account_id), ConvStatus.NEW)
 
             status = infer_status(item.lastMsg, item.status, old_status)
             storage.update_conv_status(conv_id, self._account_id, status)

@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import threading
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -19,17 +20,17 @@ from bzauto.ui.control_panel import ControlPanel
 from bzauto.ui.log_window import LogWindow
 from bzauto.ui.config_dialog import ConfigDialog
 from bzauto.ui.data_window import DataWindow
-from bzauto.pages.chat_list import BossChatListPage
-from bzauto.pages.job_list import BossJobListPage
-from bzauto.flows.scrape_chat import BossScrapeChatFlow
-from bzauto.flows.scrape_only import BossScrapeOnlyFlow
-from bzauto.flows.scrape import BossScrapeFlow
-from bzauto.flows.delete_chat import BossDeleteChatFlow
-from bzauto.server.tab_session import TabSession
+from bzauto.notify import format_task_lines, get_notifier
 from bzauto.server.lifecycle import start_server, get_registry
 from bzauto.storage import Storage
-from bzauto.task_runner import TaskRunner
-from bzauto.scheduler import BzScheduler
+from bzauto.task_runner import ScheduledTask, TaskRunner
+from bzauto.scheduler import (
+    BzScheduler,
+    ScrapeTask,
+    ScrapeChatTask,
+    DeleteChatTask,
+    ScrapeAndChatTask,
+)
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -63,6 +64,7 @@ class BzAutoApp:
         # 后台线程 + event loop（所有异步操作在此执行）
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
+        self._ready = threading.Event()
         self._start_bg_thread()
 
         # 任务状态
@@ -82,11 +84,16 @@ class BzAutoApp:
     def _run_bg_loop(self) -> None:
         """后台线程入口：运行 event loop。"""
         asyncio.set_event_loop(self._loop)
-        # 初始化 TaskRunner 和 Scheduler
+        # TaskRunner/Scheduler 在 loop running 后初始化（asyncio.Queue 需要 running loop）
+        self._loop.call_soon(self._init_runner)
+        self._loop.run_forever()
+
+    def _init_runner(self) -> None:
+        """loop 运行后的首次回调：初始化 TaskRunner、Scheduler、启动服务器。"""
         self._task_runner = TaskRunner(self._loop)
         self._scheduler = BzScheduler(self._task_runner, self._loop, self._storage)
-        self._loop.call_soon(self._init_scheduler)
-        self._loop.run_forever()
+        self._ready.set()
+        asyncio.create_task(self._init_scheduler())
 
     async def _init_scheduler(self) -> None:
         """启动时恢复 + 启动调度器。"""
@@ -147,75 +154,59 @@ class BzAutoApp:
         if self._data_win is not None and self._data_win.isVisible():
             self._data_win.refresh_all()
 
-    def _on_scrape_chat(self) -> None:
-        """聊天爬取。"""
-        async def _task() -> None:
-            session = TabSession()
-            page = BossChatListPage(session)
-            flow = BossScrapeChatFlow(page, session, "main", self._storage)
-            result = await flow.run(max_scrolls=0)
-            log.info("聊天爬取完成: %d 条", len(result.get("items", [])))
+    # ── UI 按钮 → ScheduledTask ──
 
-        self._run_task(_task)
+    def _on_scrape_chat(self) -> None:
+        self._submit(ScrapeChatTask("main", self._storage))
 
     def _on_scrape_jobs(self) -> None:
-        """职位爬取（纯抓取，不沟通）。"""
-        async def _task() -> None:
-            session = TabSession()
-            page = BossJobListPage(session)
-            flow = BossScrapeOnlyFlow(page, session, "main", self._storage)
-            jobs = await flow.run(max_scrolls=10)
-            log.info("职位爬取完成: %d 条 -> DB", len(jobs))
-            self._bridge.data_updated.emit()
-
-        self._run_task(_task)
+        self._submit(ScrapeTask("main", self._storage))
 
     def _on_batch_chat(self) -> None:
-        """批量沟通（抓取 + 自动沟通）。"""
-        async def _task() -> None:
-            session = TabSession()
-            page = BossJobListPage(session)
-            flow = BossScrapeFlow(page, session, "main", self._storage)
-            jobs = await flow.run(max_scrolls=10)
-            log.info("批量沟通完成: %d 条 -> DB", len(jobs))
-            self._bridge.data_updated.emit()
-
-        self._run_task(_task)
+        self._submit(ScrapeAndChatTask("main", self._storage))
 
     def _on_delete_chat(self) -> None:
-        """聊天删拒：遍历聊天列表，删除拒信。"""
-        async def _task() -> None:
-            session = TabSession()
-            page = BossChatListPage(session)
-            flow = BossDeleteChatFlow(page, session, "main", self._storage)
-            result = await flow.run(dry_run=False)
-            log.info("聊天删拒完成: 共删除 %d 条", len(result))
-            self._bridge.data_updated.emit()
+        self._submit(DeleteChatTask("main", self._storage))
 
-        self._run_task(_task)
+    # ── 任务管理：全部走 TaskRunner 队列 ──
 
-    def _run_task(self, coro_func: Any, *args: Any, **kwargs: Any) -> None:
-        """提交异步任务到后台 loop 执行。互斥：同时只允许一个任务。"""
+    def _submit(self, task: ScheduledTask) -> None:
+        """提交 ScheduledTask 到 TaskRunner，完成后发送通知。"""
+        if not self._ready.wait(timeout=10):
+            log.error("系统未就绪，无法启动任务")
+            return
+
         if self._current_task is not None and not self._current_task.done():
             log.warning("已有任务在运行，请等待完成")
             return
 
         self._bridge.buttons_enabled.emit(False)
-        log.info("开始任务...")
+        log.info("开始 %s...", task.name)
 
         self._current_task = asyncio.run_coroutine_threadsafe(
-            self._wrap_task(coro_func, *args, **kwargs),
+            self._run_and_notify(task),
             self._loop,
         )
         self._current_task.add_done_callback(self._on_task_done)
 
-    async def _wrap_task(self, coro_func: Any, *args: Any, **kwargs: Any) -> Any:
-        """包装任务：确保服务器已启动 + 异常处理。"""
+    async def _run_and_notify(self, task: ScheduledTask) -> Any:
+        """在后台执行 ScheduledTask 并通过 TaskRunner 排队，完成后通知。"""
         try:
             await start_server()
-            return await coro_func(*args, **kwargs)
-        except Exception as e:
-            log.error("任务异常: %s", e)
+            # 等待 _task_runner 就绪（防御性，防止极罕见的竞态）
+            while self._task_runner is None:
+                await asyncio.sleep(0.05)
+            result = await self._task_runner.submit_and_wait(task)
+            lines = format_task_lines(task.name, result)
+            if lines:
+                await get_notifier().send(
+                    f"{task.name}完成 {datetime.datetime.now():%m-%d %H:%M}",
+                    "\n".join(lines),
+                )
+            self._bridge.data_updated.emit()
+            return result
+        except Exception:
+            log.error("任务异常 (%s):\n%s", task.name, traceback.format_exc())
             raise
 
     def _on_task_done(self, future: asyncio.Future) -> None:
@@ -223,7 +214,9 @@ class BzAutoApp:
         if future.cancelled():
             log.info("任务已取消")
         elif future.exception():
-            log.error("任务失败: %s", future.exception())
+            exc = future.exception()
+            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+            log.error("任务失败:\n%s", tb)
         self._bridge.buttons_enabled.emit(True)
 
     def run(self) -> None:

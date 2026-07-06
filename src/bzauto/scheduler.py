@@ -9,10 +9,14 @@ from typing import Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bzauto.config import get_config
+from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.flows.dispatch import DispatchFlow
 from bzauto.flows.scan import ScanFlow
+from bzauto.flows.scrape import BossScrapeFlow
+from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.flows.scrape_only import BossScrapeOnlyFlow
-from bzauto.notify import NotificationAggregator, get_notifier
+from bzauto.notify import NotificationAggregator, format_task_lines, get_notifier
+from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
@@ -75,6 +79,49 @@ class DispatchTask(ScheduledTask):
         return result
 
 
+class ScrapeChatTask(ScheduledTask):
+    name = "聊天爬取"
+
+    def __init__(self, account_id: str, storage: Storage) -> None:
+        self._account_id = account_id
+        self._storage = storage
+
+    async def execute(self) -> dict[str, Any]:
+        session = TabSession(account_id=self._account_id)
+        page = BossChatListPage(session)
+        flow = BossScrapeChatFlow(page, session, self._account_id, self._storage)
+        return await flow.run(max_scrolls=10)
+
+
+class DeleteChatTask(ScheduledTask):
+    name = "删拒"
+
+    def __init__(self, account_id: str, storage: Storage) -> None:
+        self._account_id = account_id
+        self._storage = storage
+
+    async def execute(self) -> dict[str, Any]:
+        session = TabSession(account_id=self._account_id)
+        page = BossChatListPage(session)
+        flow = BossDeleteChatFlow(page, session, self._account_id, self._storage)
+        return {"deleted": len(await flow.run(dry_run=False))}
+
+
+class ScrapeAndChatTask(ScheduledTask):
+    name = "抓取沟通"
+
+    def __init__(self, account_id: str, storage: Storage) -> None:
+        self._account_id = account_id
+        self._storage = storage
+
+    async def execute(self) -> dict[str, Any]:
+        session = TabSession(account_id=self._account_id)
+        page = BossJobListPage(session)
+        flow = BossScrapeFlow(page, session, self._account_id, self._storage)
+        jobs = await flow.run(max_scrolls=10)
+        return {"scraped_and_chatted": len(jobs)}
+
+
 class ScanTask(ScheduledTask):
     name = "扫描"
 
@@ -122,7 +169,7 @@ class BzScheduler:
         for acc in accounts:
             task = ScrapeTask(acc["account_id"], self._storage)
             result = await self._runner.submit_and_wait(task)
-            agg.add_section(acc["name"], [f"采集 {result.get('scraped', 0)} 个"])
+            agg.add_section(acc["name"], format_task_lines("采集", result))
         await agg.flush()
 
     async def _trigger_dispatch(self) -> None:
@@ -131,17 +178,13 @@ class BzScheduler:
         for acc in accounts:
             task = DispatchTask(acc["account_id"], self._storage, get_config().schedule.dispatch_batch_size)
             result = await self._runner.submit_and_wait(task)
-            if result.get("skipped"):
-                agg.add_section(acc.get("name", acc["account_id"]), [f"跳过: {result['skipped']}"])
-            else:
+            lines = format_task_lines("投递", result)
+            if not result.get("skipped"):
                 account_data = self._storage.get_account(acc['account_id'])
                 daily_count = account_data.get('daily_count', 0) if account_data else 0
                 daily_limit = account_data.get('daily_limit', 150) if account_data else 150
-                total = result.get('success', 0) + result.get('failed', 0)
-                agg.add_section(acc.get("name", acc["account_id"]), [
-                    f"投递 {total} 个 (成功 {result.get('success', 0)}, 失败 {result.get('failed', 0)})",
-                    f"今日已投 {daily_count}/{daily_limit}",
-                ])
+                lines.append(f"今日已投 {daily_count}/{daily_limit}")
+            agg.add_section(acc.get("name", acc["account_id"]), lines)
         await agg.flush()
 
     async def _trigger_scan(self) -> None:
@@ -150,13 +193,7 @@ class BzScheduler:
         for acc in accounts:
             task = ScanTask(acc["account_id"], self._storage)
             result = await self._runner.submit_and_wait(task)
-            lines = [
-                f"删拒 {result.get('deleted', 0)} 条",
-                f"新对话 {result.get('new', 0)} 条",
-            ]
-            for r in result.get("rejections", [])[:5]:
-                lines.append(f"  {r}")
-            agg.add_section(acc.get("name", acc["account_id"]), lines)
+            agg.add_section(acc.get("name", acc["account_id"]), format_task_lines("扫描", result))
         await agg.flush()
 
     def _get_scraper_accounts(self) -> list[dict]:
