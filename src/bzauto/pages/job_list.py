@@ -230,19 +230,7 @@ class BossJobListPage(BasePage):
                     "  window.scrollTo(0, document.body.scrollHeight);"
                     "})()"
                 )
-                await asyncio.sleep(0.5)
-
-                bbox = await self._session.bbox(select="div.job-list-container")
-                if bbox:
-                    cx = bbox["cx"]
-                    cy = bbox["cy"]
-                    await self._session.scroll_wheel(50, at_x=int(cx), at_y=int(cy), presses=3)
-                    await asyncio.sleep(0.3)
-                    await self._session.scroll_wheel(-50, at_x=int(cx), at_y=int(cy), presses=6)
-                    await asyncio.sleep(scroll_timeout)
-                else:
-                    await asyncio.sleep(scroll_timeout)
-
+                await asyncio.sleep(5)
                 continue
 
             stale_rounds = 0

@@ -99,7 +99,7 @@ class ScrapeChatTask(ScheduledTask):
         session = bm.get_session(self._account_id)
         page = BossChatListPage(session)
         flow = BossScrapeChatFlow(page, session, self._account_id, self._storage)
-        return await flow.run(max_scrolls=10)
+        return await flow.run()
 
 
 class DeleteChatTask(ScheduledTask):

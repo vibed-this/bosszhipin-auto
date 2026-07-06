@@ -41,7 +41,6 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         self,
         url: str | None = None,
         *,
-        max_scrolls: int = 10,
         output: str | Path | None = None,
     ) -> dict[str, Any]:
         await self._setup(url or self._chat_url, reuse_existing=True)
@@ -58,7 +57,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
 
         storage = self._storage
 
-        async for item, _idx in self._page.iter_chat_items(max_scrolls=max_scrolls):
+        async for item, _idx in self._page.iter_chat_items():
             all_items.append(item)
             log.info("消息：%s·%s %s", item.name, item.company, item.time)
 

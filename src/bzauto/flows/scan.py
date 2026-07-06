@@ -28,7 +28,7 @@ class ScanFlow:
 
         await self.session.ensure_tab(url, reuse_existing=True)
 
-        result = await self.scrape_flow.run(max_scrolls=10)
+        result = await self.scrape_flow.run()
         deleted = await self.delete_flow.run(dry_run=False)
 
         return {

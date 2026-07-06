@@ -84,10 +84,10 @@ class BossChatListPage(BasePage):
     async def iter_chat_items(
         self,
         *,
-        max_scrolls: int = 3,
         scroll_timeout: float = 5.0,
     ) -> AsyncIterator[tuple[ChatItem, int]]:
         """全量捞取当前可见聊天项，滚动后捞取新项，按 (name, company) 去重。"""
+        max_scrolls = 3
         seen: set[tuple[str, str]] = set()
         scroll_count = 0
 

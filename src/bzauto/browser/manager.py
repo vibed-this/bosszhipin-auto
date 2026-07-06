@@ -7,7 +7,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMainWindow, QPushButton, QTabWidget, QVBoxLayout, QWidget
@@ -91,6 +92,10 @@ class BrowserManager(QMainWindow):
             self._add_account_tab(acc)
 
         self._tabs.currentChanged.connect(self._on_tab_changed)
+
+    def showEvent(self, event: QShowEvent) -> None:
+        self.setWindowState(self.windowState() | Qt.WindowMaximized)
+        super().showEvent(event)
 
     def _add_account_tab(self, acc: dict[str, Any]) -> None:
         account_id: str = acc["id"]

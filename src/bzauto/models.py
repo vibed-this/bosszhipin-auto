@@ -7,10 +7,12 @@ import hashlib
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
+import logging
 
 from bzauto.enums import MsgType
 from bzauto.models_doc import ConvDoc, JobDoc
 
+log = logging.getLogger(__name__)
 
 def make_job_id(href: str) -> str:
     """从职位链接提取或计算 job_id。
@@ -92,30 +94,14 @@ def parse_chat_time(time_text: str) -> str:
             dt = today - datetime.timedelta(days=1)
         return dt.isoformat()
 
-    # 周X（中文星期几）
-    weekday_map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
-    for c in t:
-        if c in weekday_map:
-            target_wday = weekday_map[c]
-            days_ago = (now.weekday() - target_wday) % 7
-            if days_ago == 0:
-                days_ago = 7
-            m = re.search(r'(\d{2}):(\d{2})', t)
-            if m:
-                dt = (today - datetime.timedelta(days=days_ago)).replace(hour=int(m.group(1)), minute=int(m.group(2)))
-            else:
-                dt = today - datetime.timedelta(days=days_ago)
-            return dt.isoformat()
-
-    # MM月DD日
+    # MM月DD日（只有日期，没有时间）
     m = re.match(r'^(\d{1,2})月(\d{1,2})日', t)
     if m:
         month, day = int(m.group(1)), int(m.group(2))
-        year = now.year
         dt = today.replace(month=month, day=day)
         if dt > now:
-            dt = dt.replace(year=year - 1)
-        return dt.isoformat()
+            dt = dt.replace(year=now.year - 1)
+        return dt.strftime("%Y-%m-%d")
 
     # X分钟前
     m = re.match(r'^(\d+)分钟前', t)
@@ -252,6 +238,8 @@ class ChatItem:
         :returns: ConvDoc 实例
         """
         conv_id = make_conv_id(account_id, self.name, self.company)
+        parsed_time = parse_chat_time(self.time)
+        log.debug("解析聊天时间：%s → %s", self.time, parsed_time)
         return ConvDoc(
             conv_id=conv_id,
             account=account_id,
@@ -259,7 +247,7 @@ class ChatItem:
             company=self.company,
             position=self.position,
             last_msg=self.lastMsg,
-            last_msg_time=parse_chat_time(self.time),
+            last_msg_time=parsed_time,
             platform_status=self.status,
             sender=self.sender,
             unread_count=self.unread_count,
