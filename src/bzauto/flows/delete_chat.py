@@ -1,14 +1,14 @@
+"""聊天删除流程编排。"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
+from bzauto.flows.base import BaseFlow
 from bzauto.pages.chat_list import BossChatListPage
-
-if TYPE_CHECKING:
-    from bzauto.server.tab_session import TabSession
+from bzauto.server.tab_session import TabSession
 
 log = logging.getLogger("flow.delete_chat")
 
@@ -24,7 +24,7 @@ def _should_delete(status: str, last_msg: str) -> bool:
     return False
 
 
-class BossDeleteChatFlow:
+class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
     """遍历消息列表，删除符合条件的聊天记录。
 
     条件（任一满足）：
@@ -32,9 +32,8 @@ class BossDeleteChatFlow:
     - lastMsg 包含关键词：抱歉、不好意思、对不起、不合适、不太合适
     """
 
-    def __init__(self, page: BossChatListPage, session: "TabSession") -> None:
-        self._page = page
-        self._session = session
+    def __init__(self, page: BossChatListPage, session: TabSession) -> None:
+        super().__init__(page, session)
 
     async def run(
         self,
@@ -42,23 +41,9 @@ class BossDeleteChatFlow:
         *,
         dry_run: bool = True,
     ) -> list[dict[str, Any]]:
-        session = self._session
+        from bzauto.pages.chat_list import _CHAT_URL
 
-        from bzauto.server.lifecycle import ensure_tab
-        await ensure_tab(session, url or "https://www.zhipin.com/web/geek/chat", reuse_existing=True)
-        await session.activate()
-
-        log.info("等待聊天页面加载...")
-        loaded = await self._page.is_loaded()
-        if not loaded:
-            for _ in range(20):
-                await asyncio.sleep(0.5)
-                if await self._page.is_loaded():
-                    loaded = True
-                    break
-        if not loaded:
-            log.warning("聊天列表未加载")
-            return []
+        await self._setup(url or _CHAT_URL, reuse_existing=True)
 
         processed: set[tuple[str, str]] = set()
         deleted: list[dict[str, Any]] = []

@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 
-from bzauto.server import get_registry, start_server, TabSession
+from bzauto.server import start_server, TabSession
 
 log = logging.getLogger("main")
 

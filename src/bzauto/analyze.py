@@ -18,8 +18,8 @@ import asyncio
 import logging
 import sys
 
-from bzauto.server.session import TabSession
-from bzauto.server.lifecycle import get_registry, start_server, stop_server, ensure_tab
+from bzauto.server.tab_session import TabSession
+from bzauto.server.lifecycle import start_server, stop_server, ensure_tab
 
 log = logging.getLogger("analyze")
 

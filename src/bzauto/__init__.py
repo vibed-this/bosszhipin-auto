@@ -1,6 +1,6 @@
 from bzauto.server.registry import TabRegistry, ElementNotFound
 from bzauto.server.remote_session import RemoteSession
-from bzauto.server.session import TabSession
+from bzauto.server.tab_session import TabSession
 from bzauto.server.app import create_app, run_server
 from bzauto.server.lifecycle import (
     get_registry,

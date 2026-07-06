@@ -1,6 +1,7 @@
 """TabSession：当前 tab 的操作代理。"""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -121,3 +122,59 @@ class TabSession:
 
     def off(self, event: str, callback: Any | None = None) -> None:
         self._registry.off(event, callback)
+
+    async def click_element(
+        self,
+        select: str,
+        *,
+        filter: dict | None = None,
+        wait_visible: str | None = None,
+        wait_hidden: str | None = None,
+        timeout: float = 30.0,
+        post_sleep: float = 0.5,
+    ) -> bool:
+        """bbox → 激活 → 点击 → 可选等待。返回是否成功。"""
+        bbox = await self.bbox(select, filter=filter, timeout=timeout)
+        if bbox is None or bbox.get("css", {}).get("cx", 0) <= 0:
+            return False
+        await self.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
+        await asyncio.sleep(post_sleep)
+        if wait_visible:
+            deadline = asyncio.get_event_loop().time() + timeout
+            while asyncio.get_event_loop().time() < deadline:
+                check = await self.bbox(wait_visible, timeout=5.0)
+                if check is not None:
+                    break
+                await asyncio.sleep(0.3)
+        if wait_hidden:
+            deadline = asyncio.get_event_loop().time() + timeout
+            while asyncio.get_event_loop().time() < deadline:
+                check = await self.bbox(wait_hidden, timeout=5.0)
+                if check is None:
+                    break
+                await asyncio.sleep(0.3)
+        return True
+
+    async def scroll_wheel(
+        self,
+        dy: int,
+        *,
+        at_x: int | None = None,
+        at_y: int | None = None,
+        presses: int = 1,
+    ) -> None:
+        """细粒度滚轮，补 scroll_pagedown 的不足。"""
+        await self.activate()
+        if at_x is not None and at_y is not None:
+            pyautogui.moveTo(at_x, at_y)
+        for _ in range(presses):
+            pyautogui.scroll(dy, at_x, at_y, _pause=False)
+            await asyncio.sleep(0.05)
+
+    @property
+    def current_url(self) -> str | None:
+        """获取当前标签页的 URL。"""
+        if self._tab_id is None:
+            return None
+        tab = self._registry.get_tab(self._tab_id)
+        return tab.get("url") if tab else None

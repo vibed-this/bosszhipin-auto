@@ -23,8 +23,8 @@ from typing import Any
 
 import keyboard
 
-from bzauto.server.session import TabSession
-from bzauto.server.lifecycle import get_registry, start_server, stop_server
+from bzauto.server.tab_session import TabSession
+from bzauto.server.lifecycle import start_server, stop_server
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 
@@ -61,7 +61,7 @@ class BossChatAuto:
         return self
 
     async def __aexit__(self, *args: object) -> None:
-        pass
+        await stop_server()
 
 
 def cli_main() -> None:

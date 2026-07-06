@@ -17,11 +17,12 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from collections.abc import Callable
 from typing import Any
+
+from bzauto.server.registry import TabRegistry
 
 logger = logging.getLogger("boss.api")
 

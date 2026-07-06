@@ -8,14 +8,14 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Q_ARG, QMetaObject, Qt, Signal, QObject
+from PySide6.QtCore import Signal, QObject
 from PySide6.QtWidgets import QApplication
 
 from bzauto.ui.control_panel import ControlPanel
 from bzauto.ui.log_window import LogWindow
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
-from bzauto.server.session import TabSession
+from bzauto.server.tab_session import TabSession
 from bzauto.server.lifecycle import start_server
 
 logging.basicConfig(

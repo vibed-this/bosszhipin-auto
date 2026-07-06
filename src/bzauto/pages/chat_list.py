@@ -1,12 +1,13 @@
+"""Boss直聘聊天列表页面对象（选择器 + 操作方法）。"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
-import time
 from typing import Any, AsyncIterator
 
-from bzauto.server.session import TabSession
+from bzauto.pages.base import BasePage
+from bzauto.server.tab_session import TabSession
 
 log = logging.getLogger("page.chat_list")
 
@@ -18,15 +19,10 @@ _NAME_BOX = ".name-box"
 _TIME = ".text .time"
 _MSG = ".last-msg-text"
 _STATUS = ".message-status"
-_FIGURE = ".figure .image-circle"
-_FRIEND_CONTENT = ".friend-content"
-
 _LABEL_LIST = ".label-list li .label-name"
-_SEARCH_INPUT = ".boss-search-input"
 _FOOTER = ".boss-list-footer .finished"
 _CHAT_NO_DATA = ".chat-no-data .no-data-text"
 
-# --- 右侧聊天详情面板 ---
 _MORE_LABEL = ".chat-conversation .ui-dropmenu-label"
 _TOP_INFO = ".top-info-content"
 _DROPDOWN_LIST = ".chat-conversation .ui-dropmenu-list"
@@ -35,60 +31,52 @@ _DIALOG_WRAPPER = ".boss-dialog__wrapper"
 _DIALOG_CANCEL = ".boss-dialog__button.button-outline"
 _DIALOG_CONFIRM = ".boss-dialog__button:not(.button-outline)"
 
+_CHAT_PROJECT = {
+    "name": f"{_NAME}@text",
+    "company": f"{_NAME_BOX} span:nth-child(2)@text",
+    "position": f"{_NAME_BOX} span:nth-child(4)@text",
+    "time": f"{_TIME}@text",
+    "lastMsg": f"{_MSG}@text",
+}
 
-class BossChatListPage:
+_CHAT_PROJECT_WITH_STATUS = {
+    **_CHAT_PROJECT,
+    "status": f"{_STATUS}@text",
+}
+
+
+class BossChatListPage(BasePage):
     """Boss直聘聊天列表页面对象（选择器 + 操作方法）。"""
 
+    _LOADED_SELECTOR = "li[role='listitem']"
+
     def __init__(self, session: TabSession) -> None:
-        self._session = session
+        super().__init__(session)
 
-    async def get_chat_items(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_chat_items(
+        self,
+        limit: int = 50,
+        *,
+        include_status: bool = False,
+    ) -> list[dict[str, Any]]:
+        project = _CHAT_PROJECT_WITH_STATUS if include_status else _CHAT_PROJECT
         raw = await self._session.query(
             select=_LIST_ITEM,
-            project={
-                "name": f"{_NAME}@text",
-                "company": f"{_NAME_BOX} span:nth-child(2)@text",
-                "position": f"{_NAME_BOX} span:nth-child(4)@text",
-                "time": f"{_TIME}@text",
-                "lastMsg": f"{_MSG}@text",
-            },
+            project=project,
             return_="list",
         )
         if not raw:
             return []
+        if include_status:
+            for item in raw:
+                item["status"] = (item.get("status") or "").strip(" []")
         return raw[:limit]
-
-    async def get_chat_items_with_status(self) -> list[dict[str, Any]]:
-        raw = await self._session.query(
-            select=_LIST_ITEM,
-            project={
-                "name": f"{_NAME}@text",
-                "company": f"{_NAME_BOX} span:nth-child(2)@text",
-                "position": f"{_NAME_BOX} span:nth-child(4)@text",
-                "time": f"{_TIME}@text",
-                "lastMsg": f"{_MSG}@text",
-                "status": f"{_STATUS}@text",
-            },
-            return_="list",
-        )
-        if not raw:
-            return []
-        for item in raw:
-            item["status"] = (item.get("status") or "").strip(" []")
-        return raw
 
     async def get_chat_item_at(self, index: int) -> dict[str, Any] | None:
         raw = await self._session.query(
             select=_LIST_ITEM,
             filter={"index": index},
-            project={
-                "name": f"{_NAME}@text",
-                "company": f"{_NAME_BOX} span:nth-child(2)@text",
-                "position": f"{_NAME_BOX} span:nth-child(4)@text",
-                "time": f"{_TIME}@text",
-                "lastMsg": f"{_MSG}@text",
-                "status": f"{_STATUS}@text",
-            },
+            project=_CHAT_PROJECT_WITH_STATUS,
             return_="list",
         )
         if not raw:
@@ -97,7 +85,9 @@ class BossChatListPage:
         item["status"] = (item.get("status") or "").strip(" []")
         return item
 
-    async def iter_chat_items(self, *, max_scrolls: int = 0) -> AsyncIterator[tuple[dict[str, Any], int]]:
+    async def iter_chat_items(
+        self, *, max_scrolls: int = 0
+    ) -> AsyncIterator[tuple[dict[str, Any], int]]:
         index = 0
         scroll_count = 0
 
@@ -115,23 +105,9 @@ class BossChatListPage:
             yield item, index
             index += 1
 
-    async def get_chat_item_count(self) -> int:
-        result = await self._session.query(
-            select=_LIST_ITEM, return_="count",
-        )
-        return int(result) if result is not None else 0
-
-    async def is_loaded(self) -> bool:
-        count = await self.get_chat_item_count()
-        return count > 0
-
     async def is_chat_page(self) -> bool:
-        tabs = self._session.registry.tabs
-        for tab in tabs:
-            url = tab.get("url", "")
-            if "zhipin.com" in url and "chat" in url:
-                return True
-        return False
+        url = self._session.current_url
+        return bool(url and "zhipin.com" in url and "chat" in url)
 
     async def get_labels(self) -> list[str]:
         raw = await self._session.query(
@@ -155,90 +131,45 @@ class BossChatListPage:
             return raw[0].get("text", "")
         return None
 
-    # --- 等待元素辅助 ---
-
-    async def _wait_visible(self, select: str, *, filter: dict | None = None, timeout: float = 10.0) -> dict | None:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            bbox = await self._session.bbox(select=select, filter=filter)
-            if bbox is not None:
-                return bbox
-            await asyncio.sleep(0.3)
-        return None
-
-    async def _wait_hidden(self, select: str, *, timeout: float = 5.0) -> bool:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            bbox = await self._session.bbox(select=select)
-            if bbox is None:
-                return True
-            await asyncio.sleep(0.3)
-        return False
-
-    # --- 右侧聊天详情操作 ---
-
     async def click_chat_item(self, index: int = 0) -> bool:
-        bbox = await self._session.bbox(select=_LIST_ITEM, filter={"index": index})
-        if bbox is None:
-            log.warning("未找到聊天项 #%d", index)
-            return False
-        log.info("点击聊天项 #%d  (%d,%d)", index, bbox["physical"]["cx"], bbox["physical"]["cy"])
-        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
-        loaded = await self._wait_visible(_TOP_INFO)
-        if not loaded:
-            log.warning("点击聊天项后右侧面板未加载")
-            return False
-        return True
+        return await self._session.click_element(
+            _LIST_ITEM,
+            filter={"index": index},
+            wait_visible=_TOP_INFO,
+            post_sleep=0.5,
+        )
 
     async def click_more_button(self) -> bool:
-        bbox = await self._session.bbox(select=_MORE_LABEL)
-        if bbox is None:
-            log.warning("未找到更多按钮")
-            return False
-        log.info("点击更多按钮  (%d,%d)", bbox["physical"]["cx"], bbox["physical"]["cy"])
-        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
-        opened = await self._wait_visible(_DROPDOWN_LIST)
-        if not opened:
-            log.warning("点击更多后下拉菜单未展开")
-            return False
-        return True
+        return await self._session.click_element(
+            _MORE_LABEL,
+            wait_visible=_DROPDOWN_LIST,
+            post_sleep=0.5,
+        )
 
     async def click_delete_in_menu(self) -> bool:
-        bbox = await self._session.bbox(
-            select=_DROPDOWN_ITEM_SPAN,
+        return await self._session.click_element(
+            _DROPDOWN_ITEM_SPAN,
             filter={"textContains": "删除"},
+            wait_visible=_DIALOG_WRAPPER,
+            post_sleep=0.5,
         )
-        if bbox is None:
-            log.warning("未找到删除菜单项")
-            return False
-        log.info("点击删除  (%d,%d)", bbox["physical"]["cx"], bbox["physical"]["cy"])
-        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
-        opened = await self._wait_visible(_DIALOG_WRAPPER)
-        if not opened:
-            log.warning("点击删除后弹窗未出现")
-            return False
-        return True
 
     async def click_cancel_in_dialog(self) -> bool:
-        bbox = await self._session.bbox(select=_DIALOG_CANCEL)
-        if bbox is None:
-            log.warning("未找到取消按钮")
-            return False
-        log.info("点击取消  (%d,%d)", bbox["physical"]["cx"], bbox["physical"]["cy"])
-        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
-        hidden = await self._wait_hidden(_DIALOG_WRAPPER)
-        if not hidden:
+        result = await self._session.click_element(
+            _DIALOG_CANCEL,
+            wait_hidden=_DIALOG_WRAPPER,
+            post_sleep=0.5,
+        )
+        if not result:
             log.warning("弹窗未关闭")
-        return True
+        return result
 
     async def click_confirm_in_dialog(self) -> bool:
-        bbox = await self._session.bbox(select=_DIALOG_CONFIRM)
-        if bbox is None:
-            log.warning("未找到确定按钮")
-            return False
-        log.info("点击确定  (%d,%d)", bbox["physical"]["cx"], bbox["physical"]["cy"])
-        await self._session.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
-        hidden = await self._wait_hidden(_DIALOG_WRAPPER)
-        if not hidden:
+        result = await self._session.click_element(
+            _DIALOG_CONFIRM,
+            wait_hidden=_DIALOG_WRAPPER,
+            post_sleep=0.5,
+        )
+        if not result:
             log.warning("弹窗未关闭")
-        return True
+        return result

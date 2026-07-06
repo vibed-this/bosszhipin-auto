@@ -12,7 +12,7 @@ from bzauto.server.registry import TabRegistry
 from bzauto.server.app import create_app
 
 if TYPE_CHECKING:
-    from bzauto.server.session import TabSession
+    from bzauto.server.tab_session import TabSession
 
 log = logging.getLogger("boss.lifecycle")
 
