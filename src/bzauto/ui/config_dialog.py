@@ -1,30 +1,23 @@
 from __future__ import annotations
 
 import os
-from typing import Any
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
     QTabWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from bzauto.config import (
-    AccountConfig,
     AppConfig,
     get_config,
     get_config_path,
@@ -130,10 +123,10 @@ class ConfigDialog(QDialog):
 
     def _build_accounts_tab(self):
         layout = QVBoxLayout(self._tab_accounts)
-        self._table_accounts = QTableWidget(0, 5)
-        self._table_accounts.setHorizontalHeaderLabels(["ID", "名称", "每日上限", "启用", "角色"])
-        self._table_accounts.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        layout.addWidget(self._table_accounts)
+        label = QLabel("账号管理已移至独立窗口，点击控制台「账号」按钮管理。")
+        label.setStyleSheet("color: gray; font-size: 13px;")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(label)
 
     def _load_config(self):
         cfg = self._cfg
@@ -152,23 +145,6 @@ class ConfigDialog(QDialog):
             self._combo_msg_type.setCurrentIndex(idx)
         self._edit_target_id.setText(str(cfg.notification.napcat.target_id))
         self._edit_token.setText(cfg.notification.napcat.token)
-        self._load_accounts_table()
-
-    def _load_accounts_table(self):
-        table = self._table_accounts
-        table.setRowCount(len(self._cfg.accounts))
-        for i, acc in enumerate(self._cfg.accounts):
-            table.setItem(i, 0, QTableWidgetItem(acc.id))
-            table.setItem(i, 1, QTableWidgetItem(acc.name))
-            item = QTableWidgetItem(str(acc.daily_limit))
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 2, item)
-            enabled_item = QTableWidgetItem("是" if acc.enabled else "否")
-            enabled_item.setFlags(enabled_item.flags() | Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 3, enabled_item)
-            role_item = QTableWidgetItem(acc.role)
-            role_item.setFlags(role_item.flags() | Qt.ItemFlag.ItemIsEditable)
-            table.setItem(i, 4, role_item)
 
     def _collect_config(self) -> AppConfig:
         cfg = self._cfg

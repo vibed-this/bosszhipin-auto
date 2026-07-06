@@ -50,10 +50,12 @@ class BzWebEnginePage(QWebEnginePage):
 class _AccountTab:
     """单个账号的视图、页面、覆盖层。"""
 
-    def __init__(self, account_id: str, name: str, view: QWebEngineView,
-                 page: QWebEnginePage, overlay: DotOverlay) -> None:
+    def __init__(self, account_id: str, name: str, profile: QWebEngineProfile,
+                 view: QWebEngineView, page: QWebEnginePage,
+                 overlay: DotOverlay) -> None:
         self.account_id = account_id
         self.name = name
+        self.profile = profile
         self.view = view
         self.page = page
         self.overlay = overlay
@@ -123,20 +125,45 @@ class BrowserManager(QMainWindow):
         self._tabs.addTab(container, name)
 
         self._account_tabs[account_id] = _AccountTab(
-            account_id=account_id, name=name,
+            account_id=account_id, name=name, profile=profile,
             view=view, page=page, overlay=overlay,
         )
 
     def _on_tab_changed(self, index: int) -> None:
         log.debug("标签页切换到 index=%d", index)
 
+    def add_account(self, acc: dict[str, Any]) -> None:
+        """运行时新增账号 tab+profile。acc 需包含 id 和 name。"""
+        if acc["id"] in self._account_tabs:
+            raise ValueError(f"账号已加载: {acc['id']}")
+        self._add_account_tab(acc)
+
+    def remove_account(self, account_id: str) -> None:
+        """移除 tab + 释放 in-memory profile/view/page。磁盘 profiles/<id>/ 保留。"""
+        atab = self._account_tabs.pop(account_id, None)
+        if atab is None:
+            return
+        container = atab.view.parent()
+        idx = self._tabs.indexOf(container)
+        if idx >= 0:
+            self._tabs.removeTab(idx)
+        atab.view.stop()
+        atab.view.setPage(None)
+        atab.page.deleteLater()
+        atab.view.deleteLater()
+        atab.profile.deleteLater()
+        self._sessions.pop(account_id, None)
+        container.deleteLater()
+
     def activate_account(self, account_id: str) -> None:
-        """切换到指定账号的标签页。"""
+        """切换到指定账号的标签页并将主窗口带到前台。"""
         for idx, (aid, atab) in enumerate(self._account_tabs.items()):
             if aid == account_id:
                 self._tabs.setCurrentIndex(idx)
                 atab.view.setFocus()
                 atab.view.raise_()
+                self.raise_()
+                self.activateWindow()
                 return
         log.warning("账号 %s 不存在", account_id)
 

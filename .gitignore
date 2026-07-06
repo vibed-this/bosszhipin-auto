@@ -225,5 +225,8 @@ node_modules/
 # Runtime data (TinyDB database)
 data/
 
+# Config file (per-machine secrets, accounts, tokens)
+config.toml
+
 # Browser profiles (QWebEngineProfile per account, generated at runtime)
 profiles/

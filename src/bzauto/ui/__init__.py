@@ -72,12 +72,15 @@ class BzAutoApp:
         accounts_list = [
             {"id": a.id, "name": a.name} for a in self._cfg.accounts if a.enabled
         ]
-        self._manager = BrowserManager(accounts_list)
+        self._manager = BrowserManager(
+            accounts_list, profiles_dir=self._cfg.browser.profiles_dir,
+        )
         _set_browser_manager(self._manager)
 
         self._control = ControlPanel()
         self._log_win = LogWindow()
         self._data_win: DataWindow | None = None
+        self._account_win: AccountWindow | None = None
         self._debug_win: DebugWindow | None = None
 
         self._bridge = _TaskBridge()
@@ -130,6 +133,7 @@ class BzAutoApp:
         self._control.btn_stop.clicked.connect(self._on_stop)
         self._control.btn_config.clicked.connect(self._on_open_config)
         self._control.btn_data.clicked.connect(self._on_open_data)
+        self._control.btn_account.clicked.connect(self._on_open_account)
         self._control.btn_debug.clicked.connect(self._on_open_debug)
 
     async def _async_stop(self) -> None:
@@ -155,6 +159,16 @@ class BzAutoApp:
     def _on_data_updated(self) -> None:
         if self._data_win is not None and self._data_win.isVisible():
             self._data_win.refresh_all()
+
+    # ── 账号窗口管理 ──
+
+    def _on_open_account(self) -> None:
+        if self._account_win is None:
+            from bzauto.ui.account_window import AccountWindow
+            self._account_win = AccountWindow(self._storage)
+        self._account_win.show()
+        self._account_win.raise_()
+        self._account_win.refresh()
 
     # ── Debug 窗口管理 ──
 
