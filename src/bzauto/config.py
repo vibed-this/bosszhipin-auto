@@ -40,7 +40,7 @@ class ScrapeConfig:
 
 @dataclass
 class DeleteConfig:
-    keywords: list[str] = field(default_factory=lambda: ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "荣幸"])
+    keywords: list[str] = field(default_factory=lambda: ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "荣幸", "遗憾", "不太匹配"])
 
 
 @dataclass
@@ -128,7 +128,7 @@ min_salary = 5
 max_salary = 7
 
 [delete]
-keywords = ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "荣幸"]
+keywords = ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "荣幸", "遗憾", "不太匹配"]
 
 [follow_up]
 enabled = false
