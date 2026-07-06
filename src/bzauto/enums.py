@@ -40,3 +40,11 @@ class MsgType(StrEnum):
     INVITE_INTERVIEW = "邀面试"
     SYSTEM = "系统"
     UNKNOWN = "未知"
+
+
+class RunStatus(StrEnum):
+    """调度执行状态枚举 — 记录每次定时/手动触发的执行结果。"""
+
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"

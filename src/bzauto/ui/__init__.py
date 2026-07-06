@@ -400,6 +400,7 @@ class BzAutoApp:
         # 启动时维护
         self._storage.release_stale_claims()
         self._storage.reset_daily_counts_if_new_day()
+        self._storage.purge_old_runs(30)
         self._scheduler.start()
         log.info("系统启动完成: 调度器已运行")
 

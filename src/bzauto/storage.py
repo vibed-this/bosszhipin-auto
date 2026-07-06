@@ -12,7 +12,7 @@ from tinydb import Query, TinyDB
 from bzauto.config import get_config
 from bzauto.enums import ConvStatus, DispatchStatus
 from bzauto.models import make_conv_id, make_job_id
-from bzauto.models_doc import AccountDoc, ConvDoc, JobDoc
+from bzauto.models_doc import AccountDoc, ConvDoc, JobDoc, RunDoc
 
 log = logging.getLogger("boss.storage")
 
@@ -48,10 +48,12 @@ class Storage:
         self._conversations = self._db.table("conversations")
         self._accounts = self._db.table("accounts")
         self._meta = self._db.table("meta")
+        self._runs = self._db.table("schedule_runs")
         self._JobQ = Query()
         self._ConvQ = Query()
         self._AccountQ = Query()
         self._MetaQ = Query()
+        self._RunQ = Query()
         log.info("数据库初始化: %s", path)
 
     # ── Jobs ──
@@ -537,6 +539,49 @@ class Storage:
             {"daily_limit": limit},
             self._AccountQ.account_id == account_id,
         )
+
+    # ── Schedule Runs ──
+
+    def insert_run(self, doc: RunDoc) -> int:
+        """插入一条调度执行记录。
+
+        :param doc: 执行记录文档
+        :returns: TinyDB doc_id
+        """
+        data = doc.model_dump(exclude_none=True)
+        return self._runs.insert(data)
+
+    def get_recent_runs(self, limit: int = 50) -> list[RunDoc]:
+        """获取最近执行记录（按 started_at 倒序）。
+
+        :param limit: 最大返回条数
+        :returns: 执行记录文档列表
+        """
+        docs = self._runs.all()
+        docs.sort(key=lambda d: d.get("started_at", ""), reverse=True)
+        return [RunDoc(**r) for r in docs[:limit]]  # type: ignore[arg-type]
+
+    def get_runs_today(self) -> list[RunDoc]:
+        """获取今日执行记录。
+
+        :returns: 今日执行记录列表
+        """
+        today = _today_str()
+        return [RunDoc(**r) for r in self._runs.search(
+            self._RunQ.started_at.test(lambda v: v.startswith(today) if v else False),
+        )]  # type: ignore[arg-type]
+
+    def purge_old_runs(self, days: int = 30) -> int:
+        """清理指定天数之前的执行记录。
+
+        :param days: 保留天数（默认 30）
+        :returns: 删除的记录数
+        """
+        cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+        removed = self._runs.remove(self._RunQ.started_at < cutoff)
+        if removed:
+            log.info("清理旧执行记录: %d 条 (截止 %s)", len(removed), cutoff)
+        return len(removed)
 
     # ── Meta ──
 

@@ -102,6 +102,18 @@ class ScheduleWindow(QWidget):
         backlog_layout.addStretch()
         layout.addWidget(backlog_box)
 
+        # ── 5. 最近执行记录 ──
+        runs_box = QGroupBox("最近执行记录")
+        runs_layout = QVBoxLayout(runs_box)
+        self._runs_table = QTableWidget(0, 6)
+        self._runs_table.setHorizontalHeaderLabels(["时间", "触发类型", "账号", "状态", "结果摘要", "耗时"])
+        r_header = self._runs_table.horizontalHeader()
+        r_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._runs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._runs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        runs_layout.addWidget(self._runs_table)
+        layout.addWidget(runs_box)
+
     # ── 生命周期 ──
 
     def showEvent(self, event):
@@ -123,6 +135,7 @@ class ScheduleWindow(QWidget):
         self._refresh_task_table()
         self._refresh_quota_table()
         self._refresh_backlog()
+        self._refresh_recent_runs()
         self._update_countdown()
 
     def _refresh_overview(self) -> None:
@@ -215,3 +228,45 @@ class ScheduleWindow(QWidget):
         self._lbl_stale.setText(f"超时 Claim: {self._storage.count_stale_claims()}")
         self._lbl_today_jobs.setText(f"今日更新: {self._storage.count_jobs_today()}")
         self._lbl_dispatched.setText(f"今日投递: {self._storage.count_dispatched_today()}")
+
+    def _refresh_recent_runs(self) -> None:
+        table = self._runs_table
+        table.setRowCount(0)
+        runs = self._storage.get_recent_runs(limit=50)
+        table.setRowCount(len(runs))
+        for i, run in enumerate(runs):
+            table.setItem(i, 0, QTableWidgetItem(_fmt_run_time(run.started_at)))
+            table.setItem(i, 1, QTableWidgetItem(run.trigger))
+            table.setItem(i, 2, QTableWidgetItem(run.account_name))
+            table.setItem(i, 3, QTableWidgetItem(_fmt_run_status(run.status)))
+            table.setItem(i, 4, QTableWidgetItem(_fmt_run_result(run.result)))
+            table.setItem(i, 5, QTableWidgetItem(_fmt_duration(run.started_at, run.finished_at)))
+
+
+def _fmt_run_time(iso_str: str) -> str:
+    try:
+        dt = datetime.datetime.fromisoformat(iso_str)
+        return dt.strftime("%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return iso_str
+
+
+def _fmt_run_status(status: str) -> str:
+    mapping = {"success": "✓", "failed": "✗", "skipped": "⊘"}
+    return mapping.get(status, status)
+
+
+def _fmt_run_result(result: dict) -> str:
+    parts = [f"{k}={v}" for k, v in result.items()]
+    text = ", ".join(parts)
+    return text[:40] + "…" if len(text) > 40 else text
+
+
+def _fmt_duration(start: str, end: str) -> str:
+    try:
+        s = datetime.datetime.fromisoformat(start)
+        e = datetime.datetime.fromisoformat(end)
+        secs = (e - s).total_seconds()
+        return f"{secs:.1f}s"
+    except (ValueError, TypeError):
+        return "—"

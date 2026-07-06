@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-from bzauto.enums import ConvStatus, DispatchStatus
+from bzauto.enums import ConvStatus, DispatchStatus, RunStatus
 
 
 class JobDoc(BaseModel):
@@ -112,3 +112,28 @@ class AccountDoc(BaseModel):
     last_reset_date: str = ""
     enabled: bool = True
     role: str = "dispatcher"
+
+
+class RunDoc(BaseModel):
+    """schedule_runs 表的文档模型 — 记录每次调度/手动触发的执行结果。
+
+    :ivar trigger: 触发类型（采集 / 投递 / 扫描）
+    :ivar account_id: 账号 ID
+    :ivar account_name: 账号显示名称（冗余存储，面板免二次查询）
+    :ivar started_at: 开始时间 ISO 格式
+    :ivar finished_at: 结束时间 ISO 格式
+    :ivar status: 执行状态（success / failed / skipped）
+    :ivar result: execute() 返回值字典
+    :ivar error: 异常堆栈文本（失败时）
+    """
+
+    model_config = ConfigDict(use_enum_values=True)
+
+    trigger: str = ""
+    account_id: str = ""
+    account_name: str = ""
+    started_at: str = ""
+    finished_at: str = ""
+    status: str = RunStatus.SUCCESS
+    result: dict = {}
+    error: str = ""

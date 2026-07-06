@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import logging
 import re
+import traceback
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -21,11 +22,15 @@ from bzauto.flows.scrape_only import BossScrapeOnlyFlow
 from bzauto.notify import NotificationAggregator, format_task_lines, get_notifier
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
-from bzauto.models_doc import AccountDoc
+from bzauto.models_doc import AccountDoc, RunDoc
 from bzauto.storage import Storage
 from bzauto.task_runner import ScheduledTask, TaskRunner
 
 log = logging.getLogger("boss.scheduler")
+
+
+def _now_iso() -> str:
+    return datetime.datetime.now().isoformat()
 
 
 def parse_cron_time(time_str: str) -> dict[str, int]:
@@ -215,13 +220,46 @@ class BzScheduler:
             })
         return results
 
+    async def _run_and_record(self, trigger: str, acc: AccountDoc, task) -> dict:
+        """执行任务并记录执行结果到 schedule_runs 表。
+
+        :param trigger: 触发类型（采集 / 投递 / 扫描）
+        :param acc: 账号文档
+        :param task: ScheduledTask 实例
+        :returns: task.execute() 的返回值
+        """
+        started = _now_iso()
+        status = "success"
+        result: dict = {}
+        error = ""
+        try:
+            result = await self._runner.submit_and_wait(task)
+            if isinstance(result, dict) and result.get("skipped"):
+                status = "skipped"
+            return result
+        except Exception:
+            status = "failed"
+            error = traceback.format_exc()
+            raise
+        finally:
+            self._storage.insert_run(RunDoc(
+                trigger=trigger,
+                account_id=acc.account_id,
+                account_name=acc.name or acc.account_id,
+                started_at=started,
+                finished_at=_now_iso(),
+                status=status,
+                result=result,
+                error=error,
+            ))
+
     async def _trigger_scrape(self) -> None:
         cfg = get_config()
         accounts = self._get_scraper_accounts()
         agg = NotificationAggregator(get_notifier(), f"采集报告 {datetime.date.today().isoformat()}")
         for acc in accounts:
             task = ScrapeTask(acc.account_id, self._storage)
-            result = await self._runner.submit_and_wait(task)
+            result = await self._run_and_record("采集", acc, task)
             agg.add_section(acc.name, format_task_lines("采集", result))
         await agg.flush()
 
@@ -230,7 +268,7 @@ class BzScheduler:
         agg = NotificationAggregator(get_notifier(), f"投递报告 {datetime.datetime.now():%m-%d %H:%M}")
         for acc in accounts:
             task = DispatchTask(acc.account_id, self._storage, get_config().schedule.dispatch_batch_size)
-            result = await self._runner.submit_and_wait(task)
+            result = await self._run_and_record("投递", acc, task)
             lines = format_task_lines("投递", result)
             if not result.get("skipped"):
                 lines.append(f"今日已投 {acc.daily_count}/{acc.daily_limit}")
@@ -242,7 +280,7 @@ class BzScheduler:
         agg = NotificationAggregator(get_notifier(), f"消息扫描 {datetime.datetime.now():%m-%d %H:%M}")
         for acc in accounts:
             task = ScanTask(acc.account_id, self._storage)
-            result = await self._runner.submit_and_wait(task)
+            result = await self._run_and_record("扫描", acc, task)
             agg.add_section(acc.name or acc.account_id, format_task_lines("扫描", result))
         await agg.flush()
 
