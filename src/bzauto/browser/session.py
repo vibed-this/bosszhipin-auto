@@ -113,7 +113,7 @@ class BrowserSession:
                    filter: QueryFilter | None = None,
                    timeout: float = 30.0) -> BboxResult | None:
         """查询元素在视口中的位置。返回 {x,y,w,h,cx,cy} 或 None。"""
-        code = f"return JSON.stringify(window.__bz.bboxOf({json.dumps(select)}, {json.dumps(filter or {})}))"
+        code = f"JSON.stringify(window.__bz.bboxOf({json.dumps(select)}, {json.dumps(filter or {})}))"
         raw = await self.eval_js(code, timeout=timeout)
         if not raw or raw == "null":
             return None
@@ -127,7 +127,7 @@ class BrowserSession:
                        timeout: float = 30.0) -> list[dict]:
         """查找所有匹配元素，投影指定字段。"""
         code = (
-            f"return JSON.stringify(window.__bz.findAll("
+            f"JSON.stringify(window.__bz.findAll("
             f"{json.dumps(select)}, {json.dumps(filter or {})}, {json.dumps(project or {})}))"
         )
         raw = await self.eval_js(code, timeout=timeout)
@@ -143,7 +143,7 @@ class BrowserSession:
                        timeout: float = 30.0) -> dict | None:
         """查找第一个匹配元素。"""
         code = (
-            f"return JSON.stringify(window.__bz.findOne("
+            f"JSON.stringify(window.__bz.findOne("
             f"{json.dumps(select)}, {json.dumps(filter or {})}, {json.dumps(project or {})}))"
         )
         raw = await self.eval_js(code, timeout=timeout)
@@ -156,12 +156,12 @@ class BrowserSession:
     async def count(self, select: str, *,
                     filter: QueryFilter | None = None,
                     timeout: float = 30.0) -> int:
-        code = f"return window.__bz.count({json.dumps(select)}, {json.dumps(filter or {})})"
+        code = f"window.__bz.count({json.dumps(select)}, {json.dumps(filter or {})})"
         raw = await self.eval_js(code, timeout=timeout)
-        return int(raw) if raw is not None else 0
+        return int(raw) if raw else 0
 
     async def dump_html(self, *, timeout: float = 30.0) -> str | None:
-        code = "return window.__bz.dumpHtml()"
+        code = "window.__bz.dumpHtml()"
         return await self.eval_js(code, timeout=timeout)
 
     # ── 设备输入（Qt 事件模拟）──

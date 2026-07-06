@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QWheelEvent
 from PySide6.QtWidgets import QApplication, QWidget
 
@@ -51,7 +51,7 @@ def send_wheel(
     for _ in range(presses):
         wheel = QWheelEvent(
             pos, global_pos,
-            QPointF(0, 0), QPointF(0, dy),
+            QPoint(0, 0), QPoint(0, dy),
             Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
             Qt.ScrollPhase.ScrollUpdate, False,
         )

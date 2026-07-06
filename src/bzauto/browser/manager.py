@@ -84,6 +84,8 @@ class BrowserManager(QMainWindow):
 
         self._account_tabs: dict[str, _AccountTab] = {}
         self._sessions: dict[str, Any] = {}  # lazy init
+        self._load_futures: dict[str, asyncio.Future[bool]] = {}
+        self._load_finished: dict[str, bool] = {}
 
         for acc in accounts:
             self._add_account_tab(acc)
@@ -106,6 +108,8 @@ class BrowserManager(QMainWindow):
         page = BzWebEnginePage(profile, view)
         view.setPage(page)
 
+        self._load_finished[account_id] = False
+
         overlay = DotOverlay()
         overlay.setParent(view)
         overlay.setGeometry(0, 0, view.width(), view.height())
@@ -125,6 +129,7 @@ class BrowserManager(QMainWindow):
         view.resizeEvent = _on_resize  # type: ignore[method-assign]
 
         page.loadFinished.connect(page._on_load_finished)
+        page.loadFinished.connect(lambda ok: self._on_page_loaded(account_id, ok))
 
         # ── 每 tab 独立地址栏 ──
         back_btn = QPushButton("←")
@@ -239,23 +244,41 @@ class BrowserManager(QMainWindow):
     def connected_accounts(self) -> list[str]:
         return list(self._account_tabs.keys())
 
+    def _on_page_loaded(self, account_id: str, ok: bool) -> None:
+        """loadFinished 回调 — 记录加载状态，唤醒等待的协程。"""
+        self._load_finished[account_id] = ok
+        future = self._load_futures.get(account_id)
+        if future and not future.done():
+            future.set_result(ok)
+
     def load_url(self, account_id: str, url: str) -> None:
         """加载 URL 到指定账号。"""
         page = self.get_page(account_id)
         if page:
+            self._load_finished.pop(account_id, None)
             page.load(QUrl(url))
 
     async def wait_loaded(self, account_id: str, timeout: float = 20.0) -> bool:
-        """等待页面加载完成（通过轮询 page.url）。"""
+        """等待 loadFinished 信号，确保 JS_HELPER 已注入。"""
         page = self.get_page(account_id)
         if not page:
             return False
-        deadline = asyncio.get_event_loop().time() + timeout
-        while asyncio.get_event_loop().time() < deadline:
-            if page.url().toString() and not page.url().toString().startswith("about:"):
-                return True
-            await asyncio.sleep(0.3)
-        return False
+
+        # 已加载完成，直接返回
+        if account_id in self._load_finished:
+            return bool(self._load_finished[account_id])
+
+        # 等待 loadFinished
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
+        self._load_futures[account_id] = future
+        try:
+            ok = await asyncio.wait_for(future, timeout=timeout)
+            return bool(ok)
+        except asyncio.TimeoutError:
+            return False
+        finally:
+            self._load_futures.pop(account_id, None)
 
 
 def get_browser_manager() -> BrowserManager | None:

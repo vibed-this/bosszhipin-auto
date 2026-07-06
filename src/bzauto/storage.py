@@ -43,7 +43,7 @@ class Storage:
         resolved: str | Path = db_path if db_path is not None else get_config().storage.db_path
         path = Path(resolved)
         path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = TinyDB(str(path), indent=2, ensure_ascii=False, sort_keys=True)
+        self._db = TinyDB(str(path), indent=2, ensure_ascii=False, sort_keys=True, encoding="utf-8")
         self._jobs = self._db.table("jobs")
         self._conversations = self._db.table("conversations")
         self._accounts = self._db.table("accounts")
