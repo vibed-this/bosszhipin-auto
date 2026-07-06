@@ -60,15 +60,6 @@ class ScrapeConfig(BaseModel):
     filter: ScrapeFilterConfig = ScrapeFilterConfig()
 
 
-class DeleteConfig(BaseModel):
-    """删拒关键词配置。
-
-    :ivar keywords: 拒信关键词列表（消息包含任一即判为拒信）
-    """
-
-    keywords: list[str] = ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "荣幸", "遗憾", "不太匹配"]
-
-
 class FollowUpConfig(BaseModel):
     """跟进配置。
 
@@ -153,7 +144,6 @@ class AppConfig(BaseModel):
     browser: BrowserConfig = BrowserConfig()
     storage: StorageConfig = StorageConfig()
     scrape: ScrapeConfig = ScrapeConfig()
-    delete: DeleteConfig = DeleteConfig()
     follow_up: FollowUpConfig = FollowUpConfig()
     schedule: ScheduleConfig = ScheduleConfig()
     notification: NotificationConfig = NotificationConfig()
@@ -191,9 +181,6 @@ whitelist = ["前端", "全栈", "Web"]
 blacklist = ["出差"]
 min_salary = 5
 max_salary = 7
-
-[delete]
-keywords = ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "荣幸", "遗憾", "不太匹配"]
 
 [follow_up]
 enabled = false

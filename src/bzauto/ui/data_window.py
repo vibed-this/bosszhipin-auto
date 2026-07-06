@@ -102,10 +102,10 @@ class DataWindow(QWidget):
         self._conv_search.setPlaceholderText("搜索招聘者/公司...")
         self._conv_search.textChanged.connect(lambda: self._refresh_convs())
         self._conv_status = QComboBox()
-        self._conv_status.addItems(["全部", "新对话", "待回复", "已回复", "已读未回", "已删除", "已结束"])
+        self._conv_status.addItems(["全部", "无操作", "待回复", "待跟进", "已结束"])
         self._conv_status.currentTextChanged.connect(lambda: self._refresh_convs())
         self._conv_msg_type = QComboBox()
-        self._conv_msg_type.addItems(["全部", "普通", "拒信", "邀约", "文件"])
+        self._conv_msg_type.addItems(["全部", "普通", "拒信", "邀投简历", "邀面试", "系统", "未知"])
         self._conv_msg_type.currentTextChanged.connect(lambda: self._refresh_convs())
         self._conv_account = QComboBox()
         self._conv_account.addItem("全部")
@@ -193,7 +193,7 @@ class DataWindow(QWidget):
         convs = self._storage.search_conversations(keyword=keyword, status=status, account=account)
         msg_type_filter = self._conv_msg_type.currentText()
         if msg_type_filter != "全部":
-            convs = [c for c in convs if classify_msg_type(c.last_msg, c.sender).value == msg_type_filter]
+            convs = [c for c in convs if classify_msg_type(c.last_msg, c.sender, c.platform_status).value == msg_type_filter]
         table = self._conv_table
         table.setRowCount(len(convs))
         for i, c in enumerate(convs):
@@ -213,7 +213,7 @@ class DataWindow(QWidget):
             else:
                 display_uc = str(c.unread_count)
             table.setItem(i, 5, QTableWidgetItem(display_uc))
-            table.setItem(i, 6, QTableWidgetItem(classify_msg_type(c.last_msg, c.sender)))
+            table.setItem(i, 6, QTableWidgetItem(classify_msg_type(c.last_msg, c.sender, c.platform_status)))
             table.setItem(i, 7, QTableWidgetItem(c.platform_status))
             table.setItem(i, 8, QTableWidgetItem(c.status))
             table.setItem(i, 9, QTableWidgetItem(c.account))
@@ -318,12 +318,12 @@ class DataWindow(QWidget):
         cells = {i: t.item(row, i).text() if t.item(row, i) else "" for i in range(12)}
         sender_item = t.item(row, 4)
         sender_raw = sender_item.data(Qt.ItemDataRole.UserRole + 2) if sender_item else ""
-        msg_type = classify_msg_type(cells[3], sender_raw)
+        msg_type = classify_msg_type(cells[3], sender_raw, cells[7])
         lines = [
             f"{cells[0]} | {cells[1]} | {cells[2]}",
             f"回复时间：{cells[10]}",
             f"消息：{cells[3]}",
-            f"发送方：{'对方' if cells[4]=='other' else '自己'}",
+            f"发送方：{'对方' if sender_raw == 'other' else '自己'}",
             f"未读数量：{cells[5]}",
             f"内容分类：{msg_type}",
             f"平台状态：{cells[7]}",
@@ -355,7 +355,7 @@ class DataWindow(QWidget):
             self._refresh_convs()
 
     def _edit_conv_status(self, row, conv_id, account):
-        statuses = ["新对话", "待回复", "已回复", "已读未回", "已删除", "已结束"]
+        statuses = ["无操作", "待回复", "待跟进", "已结束"]
         current = self._conv_table.item(row, 8).text() if self._conv_table.item(row, 8) else ""
         new_status, ok = QInputDialog.getItem(self, "修改状态", "新状态:", statuses, current=statuses.index(current) if current in statuses else 0)
         if ok and new_status:

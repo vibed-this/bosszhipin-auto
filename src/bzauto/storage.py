@@ -375,7 +375,7 @@ class Storage:
         :param account: 账号 ID
         """
         self._conversations.update(
-            {"status": ConvStatus.DELETED, "status_changed_at": _now_iso(), "last_updated": _now_iso()},
+            {"status": ConvStatus.CLOSED, "status_changed_at": _now_iso(), "last_updated": _now_iso()},
             (self._ConvQ.conv_id == conv_id) & (self._ConvQ.account == account),
         )
 

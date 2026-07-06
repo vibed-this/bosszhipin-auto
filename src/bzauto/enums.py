@@ -23,21 +23,20 @@ class DispatchStatus(StrEnum):
 
 
 class ConvStatus(StrEnum):
-    """对话交互状态枚举 — 与消息内容分类正交。"""
+    """对话行动性状态枚举 — 指示是否需要用户操作。"""
 
-    NEW = "新对话"
-    PENDING_REPLY = "待回复"
-    REPLIED = "已回复"
-    READ_NO_REPLY = "已读未回"
-    DELETED = "已删除"
+    NONE = "无操作"
+    PENDING = "待回复"
+    FOLLOW_UP = "待跟进"
     CLOSED = "已结束"
 
 
 class MsgType(StrEnum):
-    """消息内容分类枚举 — 与交互状态正交。"""
+    """消息内容分类枚举 — 与行动性状态正交。"""
 
     NORMAL = "普通"
     REJECTION = "拒信"
-    INVITATION = "邀约"
-    FILE = "文件"
+    INVITE_RESUME = "邀投简历"
+    INVITE_INTERVIEW = "邀面试"
+    SYSTEM = "系统"
     UNKNOWN = "未知"

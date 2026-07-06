@@ -59,7 +59,7 @@ class ConvDoc(BaseModel):
     :ivar last_msg: 最后一条消息文本
     :ivar last_msg_time: 最后消息时间
     :ivar platform_status: BOSS 平台状态文本
-    :ivar status: 业务交互状态（新对话 / 待回复 / 已回复 / 已读未回 / 已删除 / 已结束）
+    :ivar status: 业务交互状态（无操作 / 待回复 / 待跟进 / 已结束）
     :ivar sender: 最后消息发送方标识（self | other）
     :ivar unread_count: 未读消息数（0=已读, >0=未读, -1=未知）
     :ivar status_changed_at: 状态变更时间 ISO 格式
@@ -79,7 +79,7 @@ class ConvDoc(BaseModel):
     last_msg: str = ""
     last_msg_time: str = ""
     platform_status: str = ""
-    status: str = ConvStatus.NEW
+    status: str = ConvStatus.NONE
     sender: str = ""
     unread_count: int = 0
     status_changed_at: str | None = None

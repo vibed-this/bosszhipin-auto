@@ -5,7 +5,6 @@ import asyncio
 import logging
 import random
 
-from bzauto.config import get_config
 from bzauto.browser.session import BrowserSession
 from bzauto.flows.base import BaseFlow
 from bzauto.enums import MsgType
@@ -16,26 +15,9 @@ from bzauto.storage import Storage
 log = logging.getLogger("flow.delete_chat")
 
 
-def _should_delete(status: str, last_msg: str, keywords: list[str], sender: str = "other", msg_type: MsgType = MsgType.UNKNOWN) -> bool:
-    """判断聊天是否应被删除。
-
-    :param status: 平台状态文本
-    :param last_msg: 最后一条消息
-    :param keywords: 拒信关键词列表
-    :param sender: 发送方 ("self" | "other")
-    :param msg_type: 消息内容分类
-    :returns: True 如果应删除
-    """
-    if sender == "self":
-        return False
-    if msg_type is MsgType.REJECTION:
-        return True
-    if status == "已读" and last_msg.startswith("您好"):
-        return True
-    for kw in keywords:
-        if kw in last_msg:
-            return True
-    return False
+def _should_delete(msg_type: MsgType) -> bool:
+    """判断聊天是否应被删除（委托给 classify_msg_type 判断拒信）。"""
+    return msg_type is MsgType.REJECTION
 
 
 class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
@@ -49,7 +31,6 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
     def __init__(self, page: BossChatListPage, session: BrowserSession, account_id: str = "main", storage: Storage | None = None) -> None:
         super().__init__(page, session, account_id)
         self._storage = storage
-        self._keywords = get_config().delete.keywords
 
     async def run(
         self,
@@ -68,7 +49,7 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
         db_targets: set[tuple[str, str]] = set()
         if self._storage:
             for conv in self._storage.get_conversations(account=self._account_id):
-                if classify_msg_type(conv.last_msg, conv.sender) is MsgType.REJECTION:
+                if classify_msg_type(conv.last_msg, conv.sender, conv.platform_status) is MsgType.REJECTION:
                     if conv.name and conv.company:
                         db_targets.add((conv.name, conv.company))
 
@@ -81,10 +62,8 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
             if key in processed:
                 continue
 
-            should_del = key in db_targets or _should_delete(
-                item.status, item.lastMsg, self._keywords, item.sender,
-                classify_msg_type(item.lastMsg, item.sender),
-            )
+            msg_type = classify_msg_type(item.lastMsg, item.sender, item.status)
+            should_del = key in db_targets or _should_delete(msg_type)
 
             if should_del:
                 processed.add(key)

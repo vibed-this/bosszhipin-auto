@@ -254,22 +254,60 @@ class ChatItem:
         )
 
 
-def classify_msg_type(last_msg: str, sender: str) -> MsgType:
-    """根据消息内容和发送方判断内容分类。
+_REJECTION_KWS = ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "不适合", "不太适合" , "荣幸", "遗憾", "不太匹配", "谢谢", "祝"]
+_INVITE_RESUME_KWS = ["方便", "发", "附件"]
+_INVITE_INTERVIEW_KWS = ["时间", "什么时候"]
+
+
+def is_older_than_week(last_msg_time: str) -> bool:
+    """判断 ISO 时间字符串是否超过 7 天。"""
+    if not last_msg_time:
+        return False
+    try:
+        dt = datetime.datetime.fromisoformat(last_msg_time)
+        return (datetime.datetime.now() - dt) > datetime.timedelta(days=7)
+    except (ValueError, TypeError):
+        return False
+
+
+_SYSTEM_RULES: list[str | re.Pattern] = [
+    "对方已同意，您的附件简历已发送给对方",
+    "工作地点我可以接受。",
+    "已到达面试现场",
+    "你撤回了一条消息",
+    "已到面试时间，点击进入面试间",
+    re.compile(r"您的附件简历.+已发送给Boss"),
+]
+
+
+def classify_msg_type(last_msg: str, sender: str, platform_status: str = "") -> MsgType:
+    """根据消息内容、发送方和平台状态判断内容分类。
 
     :param last_msg: 最后一条消息文本
     :param sender: 发送方标识 ("self" | "other")
+    :param platform_status: 平台状态（已读/送达/空）
     :returns: 消息内容分类
     """
+    for rule in _SYSTEM_RULES:
+        if isinstance(rule, re.Pattern):
+            if rule.search(last_msg):
+                return MsgType.SYSTEM
+        elif last_msg == rule:
+            return MsgType.SYSTEM
+
     if sender == "self":
         if last_msg.lower().endswith(".pdf"):
-            return MsgType.FILE
+            return MsgType.SYSTEM
+        if last_msg.startswith("您好") and platform_status == "已读":
+            return MsgType.REJECTION
         return MsgType.NORMAL
-    from bzauto.config import get_config
-    cfg = get_config()
-    if any(kw in last_msg for kw in cfg.delete.keywords):
+
+    if any(kw in last_msg for kw in _REJECTION_KWS):
         return MsgType.REJECTION
-    invitation_keywords = ["面试", "邀约", "到面", "面试邀请"]
-    if any(kw in last_msg for kw in invitation_keywords):
-        return MsgType.INVITATION
+
+    if any(kw in last_msg for kw in _INVITE_INTERVIEW_KWS):
+        return MsgType.INVITE_INTERVIEW
+    if any(kw in last_msg for kw in _INVITE_RESUME_KWS):
+        return MsgType.INVITE_RESUME
+
     return MsgType.NORMAL

@@ -11,22 +11,24 @@ from typing import Any
 from bzauto.browser.session import BrowserSession
 from bzauto.enums import ConvStatus, MsgType
 from bzauto.flows.base import BaseFlow
-from bzauto.models import ChatItem, classify_msg_type
+from bzauto.models import ChatItem, classify_msg_type, is_older_than_week
 from bzauto.pages.chat_list import BossChatListPage, _CHAT_URL
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.scrape_chat")
 
 
-def infer_status(sender: str, unread_count: int, old_status: str) -> str:
-    """仅判断交互状态，不涉及消息内容分类。"""
+def infer_status(sender: str, unread_count: int, old_status: str, last_msg_time: str = "") -> str:
+    """推断行动性状态，不涉及消息内容分类。"""
+    if old_status == ConvStatus.CLOSED:
+        return ConvStatus.CLOSED
     if sender == "self":
-        return old_status
+        return ConvStatus.NONE
     if unread_count > 0:
-        return ConvStatus.PENDING_REPLY
-    if old_status not in (ConvStatus.REPLIED, ConvStatus.CLOSED, ConvStatus.DELETED):
-        return ConvStatus.READ_NO_REPLY
-    return old_status
+        if is_older_than_week(last_msg_time):
+            return ConvStatus.FOLLOW_UP
+        return ConvStatus.PENDING
+    return ConvStatus.NONE
 
 
 class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
@@ -67,7 +69,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
 
                 # 查旧状态（upsert 会覆写 status，必须提前查）
                 existing = storage.get_conversation(conv_id, self._account_id)
-                old_status = existing.status or ConvStatus.NEW if existing else ConvStatus.NEW
+                old_status = existing.status or ConvStatus.NONE if existing else ConvStatus.NONE
 
                 is_new = storage.upsert_conversation(conv_doc)
                 if is_new:
@@ -75,10 +77,10 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
                 else:
                     updated_count += 1
 
-                status = infer_status(item.sender, item.unread_count, old_status)
+                status = infer_status(item.sender, item.unread_count, old_status, conv_doc.last_msg_time)
                 storage.update_conv_status(conv_id, self._account_id, status)
 
-                if classify_msg_type(item.lastMsg, item.sender) is MsgType.REJECTION:
+                if classify_msg_type(item.lastMsg, item.sender, item.status) is MsgType.REJECTION:
                     rejections.append(f"{item.name}·{item.company}: {item.lastMsg}")
                 if item.sender == "other" and item.unread_count > 0:
                     unread.append(f"{item.name}·{item.company}")
