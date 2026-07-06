@@ -108,12 +108,24 @@ class BossJobListPage(BasePage):
         return True
 
     async def click_chat(self, index: int = 0) -> None:
-        """点击沟通按钮。"""
-        await self._session.click_element(
-            "a.op-btn-chat",
-            filter={"nth": index},
-            post_sleep=1.5,
-        )
+        """等待沟通按钮出现后点击。"""
+        from bzauto.server.registry import ElementNotFound
+
+        deadline = asyncio.get_event_loop().time() + 30.0
+        last_error: Exception | None = None
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                await self._session.click_element(
+                    "a.op-btn-chat",
+                    filter={"nth": index},
+                    post_sleep=1.5,
+                )
+                return
+            except ElementNotFound as e:
+                last_error = e
+                await asyncio.sleep(0.5)
+        if last_error:
+            raise last_error
 
     async def click_expect_tab(self) -> None:
         """点击期望 tab。"""
