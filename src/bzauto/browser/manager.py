@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from PySide6.QtCore import QUrl
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QMainWindow, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMainWindow, QPushButton, QTabWidget, QVBoxLayout, QWidget
 
 from bzauto.browser.js_helper import JS_HELPER
 from bzauto.browser.overlay import DotOverlay
@@ -48,17 +48,25 @@ class BzWebEnginePage(QWebEnginePage):
 
 
 class _AccountTab:
-    """单个账号的视图、页面、覆盖层。"""
+    """单个账号的视图、页面、覆盖层、导航栏。"""
 
     def __init__(self, account_id: str, name: str, profile: QWebEngineProfile,
                  view: QWebEngineView, page: QWebEnginePage,
-                 overlay: DotOverlay) -> None:
+                 overlay: DotOverlay,
+                 url_input: QLineEdit | None = None,
+                 back_btn: QPushButton | None = None,
+                 forward_btn: QPushButton | None = None,
+                 refresh_btn: QPushButton | None = None) -> None:
         self.account_id = account_id
         self.name = name
         self.profile = profile
         self.view = view
         self.page = page
         self.overlay = overlay
+        self.url_input = url_input
+        self.back_btn = back_btn
+        self.forward_btn = forward_btn
+        self.refresh_btn = refresh_btn
 
 
 class BrowserManager(QMainWindow):
@@ -118,15 +126,58 @@ class BrowserManager(QMainWindow):
 
         page.loadFinished.connect(page._on_load_finished)
 
+        # ── 每 tab 独立地址栏 ──
+        back_btn = QPushButton("←")
+        back_btn.setFixedWidth(32)
+        forward_btn = QPushButton("→")
+        forward_btn.setFixedWidth(32)
+        refresh_btn = QPushButton("↻")
+        refresh_btn.setFixedWidth(32)
+
+        url_input = QLineEdit()
+        url_input.setPlaceholderText("输入网址...")
+
+        def _normalize_and_navigate() -> None:
+            raw = url_input.text().strip()
+            if not raw:
+                return
+            if not raw.startswith(("http://", "https://", "ftp://", "file://")):
+                raw = "https://" + raw
+            page.load(QUrl(raw))
+
+        back_btn.clicked.connect(view.back)
+        forward_btn.clicked.connect(view.forward)
+        refresh_btn.clicked.connect(view.reload)
+        url_input.returnPressed.connect(_normalize_and_navigate)
+        view.urlChanged.connect(lambda url: url_input.setText(url.toString()))
+        page.loadFinished.connect(lambda _ok: url_input.setText(page.url().toString()))
+
+        nav_layout = QHBoxLayout()
+        nav_layout.setContentsMargins(4, 4, 4, 4)
+        nav_layout.setSpacing(4)
+        nav_layout.addWidget(back_btn)
+        nav_layout.addWidget(forward_btn)
+        nav_layout.addWidget(refresh_btn)
+        nav_layout.addWidget(url_input, 1)
+
+        nav_widget = QWidget()
+        nav_widget.setLayout(nav_layout)
+
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(view)
+        layout.setSpacing(0)
+        layout.addWidget(nav_widget)
+        layout.addWidget(view, 1)
         self._tabs.addTab(container, name)
 
         self._account_tabs[account_id] = _AccountTab(
             account_id=account_id, name=name, profile=profile,
             view=view, page=page, overlay=overlay,
+            url_input=url_input,
+            back_btn=back_btn,
+            forward_btn=forward_btn,
+            refresh_btn=refresh_btn,
         )
 
     def _on_tab_changed(self, index: int) -> None:
