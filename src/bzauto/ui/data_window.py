@@ -42,6 +42,7 @@ class DataWindow(QWidget):
         self._storage = storage or Storage()
         self._setup_ui()
         self.refresh_all()
+        self.showMaximized()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -88,6 +89,7 @@ class DataWindow(QWidget):
         self._jobs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._jobs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._jobs_table.customContextMenuRequested.connect(self._jobs_context_menu)
+        self._jobs_table.setSortingEnabled(True)
         self._jobs_table.viewport().installEventFilter(self)
         layout.addWidget(self._jobs_table)
 
@@ -135,6 +137,7 @@ class DataWindow(QWidget):
         self._conv_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._conv_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._conv_table.customContextMenuRequested.connect(self._conv_context_menu)
+        self._conv_table.setSortingEnabled(True)
         self._conv_table.viewport().installEventFilter(self)
         layout.addWidget(self._conv_table)
 
@@ -168,6 +171,7 @@ class DataWindow(QWidget):
             status = ""
         jobs = self._storage.search_jobs(keyword=keyword, status=status)
         table = self._jobs_table
+        table.setSortingEnabled(False)
         table.setRowCount(len(jobs))
         for i, j in enumerate(jobs):
             table.setItem(i, 0, QTableWidgetItem(j.title))
@@ -178,6 +182,7 @@ class DataWindow(QWidget):
             table.setItem(i, 5, QTableWidgetItem(j.applied_at.replace("T", " ")[:16] if j.applied_at else ""))
             table.setItem(i, 6, QTableWidgetItem(j.note))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, j.job_id)
+        table.setSortingEnabled(True)
         total = len(self._storage.search_jobs())
         filtered = len(jobs)
         self._jobs_status_bar.setText(f"总 {total} 条 | 筛选 {filtered} 条")
@@ -195,6 +200,7 @@ class DataWindow(QWidget):
         if msg_type_filter != "全部":
             convs = [c for c in convs if classify_msg_type(c.last_msg, c.sender, c.platform_status).value == msg_type_filter]
         table = self._conv_table
+        table.setSortingEnabled(False)
         table.setRowCount(len(convs))
         for i, c in enumerate(convs):
             table.setItem(i, 0, QTableWidgetItem(c.name))
@@ -221,6 +227,7 @@ class DataWindow(QWidget):
             table.setItem(i, 11, QTableWidgetItem(c.note))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, c.conv_id)
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole + 1, c.account)
+        table.setSortingEnabled(True)
 
     def _jobs_context_menu(self, pos):
         item = self._jobs_table.itemAt(pos)
