@@ -101,8 +101,11 @@ class DataWindow(QWidget):
         self._conv_search.setPlaceholderText("搜索招聘者/公司...")
         self._conv_search.textChanged.connect(lambda: self._refresh_convs())
         self._conv_status = QComboBox()
-        self._conv_status.addItems(["全部", "新对话", "待回复", "已回复", "已读未回", "拒信", "邀约", "已删除", "已结束"])
+        self._conv_status.addItems(["全部", "新对话", "待回复", "已回复", "已读未回", "已删除", "已结束"])
         self._conv_status.currentTextChanged.connect(lambda: self._refresh_convs())
+        self._conv_msg_type = QComboBox()
+        self._conv_msg_type.addItems(["全部", "普通", "拒信", "邀约", "文件"])
+        self._conv_msg_type.currentTextChanged.connect(lambda: self._refresh_convs())
         self._conv_account = QComboBox()
         self._conv_account.addItem("全部")
         self._load_account_filter()
@@ -111,6 +114,7 @@ class DataWindow(QWidget):
         self._btn_conv_refresh.clicked.connect(self._refresh_convs)
         toolbar.addWidget(self._conv_search)
         toolbar.addWidget(self._conv_status)
+        toolbar.addWidget(self._conv_msg_type)
         toolbar.addWidget(self._conv_account)
         toolbar.addWidget(self._btn_conv_refresh)
         layout.addLayout(toolbar)
@@ -186,6 +190,9 @@ class DataWindow(QWidget):
         if account == "全部":
             account = ""
         convs = self._storage.search_conversations(keyword=keyword, status=status, account=account)
+        msg_type_filter = self._conv_msg_type.currentText()
+        if msg_type_filter != "全部":
+            convs = [c for c in convs if classify_msg_type(c.get("last_msg", ""), c.get("sender", "")) == msg_type_filter]
         table = self._conv_table
         table.setRowCount(len(convs))
         for i, c in enumerate(convs):
@@ -319,7 +326,7 @@ class DataWindow(QWidget):
             self._refresh_convs()
 
     def _edit_conv_status(self, row, conv_id, account):
-        statuses = ["新对话", "待回复", "已回复", "已读未回", "拒信", "邀约", "已删除", "已结束"]
+        statuses = ["新对话", "待回复", "已回复", "已读未回", "已删除", "已结束"]
         current = self._conv_table.item(row, 8).text() if self._conv_table.item(row, 8) else ""
         new_status, ok = QInputDialog.getItem(self, "修改状态", "新状态:", statuses, current=statuses.index(current) if current in statuses else 0)
         if ok and new_status:
