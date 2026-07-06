@@ -16,6 +16,10 @@
     "http://127.0.0.1/*",
     "ws://127.0.0.1/*"
   ],
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": false
+  },
   "background": {
     "service_worker": "src/background/index.ts",
     "type": "module"

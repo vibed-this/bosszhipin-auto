@@ -1,28 +1,32 @@
-"""Boss直聘职位列表爬取流程编排。"""
+"""Boss直聘职位列表爬取流程编排（带 DB upsert）。"""
 from __future__ import annotations
 
 import asyncio
 import logging
 import random
 
+from bzauto.config import get_config
 from bzauto.flows.base import BaseFlow
 from bzauto.models import JobCard
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.server.tab_session import TabSession
+from bzauto.storage import Storage
 
 log = logging.getLogger("flow.scrape")
-
-_WHITELIST = ["前端", "全栈", "Web"]
-_BLACKLIST = ["出差"]
-_MIN_SALARY = 5
-_MAX_SALARY = 7
 
 
 class BossScrapeFlow(BaseFlow[BossJobListPage]):
     """爬取 + 沟通流程编排。"""
 
-    def __init__(self, page: BossJobListPage, session: TabSession) -> None:
-        super().__init__(page, session)
+    def __init__(self, page: BossJobListPage, session: TabSession, account_id: str = "main", storage: Storage | None = None) -> None:
+        super().__init__(page, session, account_id)
+        self._storage = storage
+        cfg = get_config()
+        self._whitelist = cfg.scrape.filter.whitelist
+        self._blacklist = cfg.scrape.filter.blacklist
+        self._min_salary = cfg.scrape.filter.min_salary
+        self._max_salary = cfg.scrape.filter.max_salary
+        self._jobs_url = "https://www.zhipin.com/web/geek/jobs"
 
     def _iter_cards(
         self,
@@ -34,10 +38,10 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
         max_salary: int | None = None,
     ):
         return self._page.iter_filtered_cards(
-            whitelist=whitelist or _WHITELIST,
-            blacklist=blacklist or _BLACKLIST,
-            min_salary=min_salary if min_salary is not None else _MIN_SALARY,
-            max_salary=max_salary if max_salary is not None else _MAX_SALARY,
+            whitelist=whitelist or self._whitelist,
+            blacklist=blacklist or self._blacklist,
+            min_salary=min_salary if min_salary is not None else self._min_salary,
+            max_salary=max_salary if max_salary is not None else self._max_salary,
             max_scrolls=max_scrolls,
         )
 
@@ -50,7 +54,7 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
         max_salary: int | None = None,
         reuse_existing: bool = False,
     ) -> list[JobCard]:
-        await self._setup(url, reuse_existing=reuse_existing)
+        await self._setup(url or self._jobs_url, reuse_existing=reuse_existing)
 
         log.info("切换到期望职位tab...")
         try:
@@ -60,9 +64,36 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
 
         all_jobs: list[JobCard] = []
 
+        # 跨次去重
+        seen_hrefs = self._storage.get_seen_job_hrefs() if self._storage else set()
+        seen_duplicate: set[tuple[str, str]] = set()
+
         async for card, idx in self._iter_cards(max_scrolls=max_scrolls, min_salary=min_salary, max_salary=max_salary):
+            # 去重
+            key = (card.title, card.company)
+            if key in seen_duplicate:
+                continue
+            seen_duplicate.add(key)
+
+            if card.href in seen_hrefs:
+                log.debug("跳过已采集: %s", card.href)
+                continue
+
             log.info("  [#%d] %s — %s", idx, card.title, card.salary)
             all_jobs.append(card)
+
+            # DB upsert
+            if self._storage:
+                db_dict = card.to_db_dict(self._account_id)
+                self._storage.upsert_job(db_dict)
+                self._storage.add_seen_job_hrefs([card.href])
+
+            # 沟通前检查配额
+            if self._storage:
+                remaining = self._storage.get_remaining_quota(self._account_id)
+                if remaining <= 0:
+                    log.info("配额已满，终止沟通")
+                    break
 
             await self._page.click_card_at(idx)
 
@@ -73,6 +104,10 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
             if not result:
                 log.warning("每日沟通上限已达，终止抓取")
                 break
+
+            if self._storage:
+                self._storage.mark_job_success(card.href.rsplit("/", 1)[-1].replace(".html", ""))
+                self._storage.increment_daily_count(self._account_id)
 
             await asyncio.sleep(random.uniform(0.5, 1.0))
 

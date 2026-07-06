@@ -172,6 +172,22 @@ class BossJobListPage(BasePage):
                 return False
         return True
 
+    async def find_card_by_href(self, href: str) -> int:
+        """通过 href 查找卡片索引。未找到返回 -1。"""
+        result = await self._session.execute(
+            f"(function(){{"
+            f"  var cards = document.querySelectorAll('{_JOB_ITEM}');"
+            f"  for (var i = 0; i < cards.length; i++) {{"
+            f"    var link = cards[i].querySelector('{_JOB_LINK}');"
+            f"    if (link && link.href && (link.href === '{href}' || link.href.includes('{href.split('/').pop()}'))) {{"
+            f"      return i;"
+            f"    }}"
+            f"  }}"
+            f"  return -1;"
+            f"}})()"
+        )
+        return int(result) if result is not None else -1
+
     async def get_salary_texts(self) -> list[str]:
         raw = await self._session.query(
             select=_SALARY, return_="raw",

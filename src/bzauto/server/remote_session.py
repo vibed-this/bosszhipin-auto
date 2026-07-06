@@ -5,7 +5,7 @@ Usage::
     from bzauto import TabRegistry, RemoteSession, create_app
 
     registry = TabRegistry()
-    session = RemoteSession(registry)
+    session = RemoteSession(registry, "main")
     app = create_app(registry)
 
     # Start the Socket.IO server in a background task, then:
@@ -43,13 +43,17 @@ logger = logging.getLogger("boss.api")
 class RemoteSession:
     """High-level Python API for remote browser tab control.
 
+    Routes all operations through a specific account_id to the correct
+    Chrome profile connection.
+
     All operations go through the extension background Socket.IO,
     which uses ``chrome.scripting.executeScript`` for JS execution
     and ``chrome.tabs.*`` for tab management.
     """
 
-    def __init__(self, registry: "TabRegistry") -> None:
+    def __init__(self, registry: "TabRegistry", account_id: str = "default") -> None:
         self._registry = registry
+        self._account_id = account_id
 
     def on(self, event: str, callback: Callable[[TabEvent], Any]) -> None:
         logger.debug("注册事件监听: event=%s", event)
@@ -64,10 +68,12 @@ class RemoteSession:
         url: str,
         timeout: float = 15.0,
     ) -> OpenTabResult:
-        logger.debug("打开标签: url=%s timeout=%s", url, timeout)
-        if not self._registry.is_connected():
-            raise ConnectionError("扩展后台未连接")
-        result: OpenTabResult = await self._registry.call("open_tab", {"url": url}, timeout=timeout)
+        logger.debug("打开标签: account=%s url=%s timeout=%s", self._account_id, url, timeout)
+        if not self._registry.is_connected(self._account_id):
+            raise ConnectionError(f"账号 {self._account_id} 未连接")
+        result: OpenTabResult = await self._registry.call(
+            "open_tab", {"url": url}, timeout=timeout, account_id=self._account_id,
+        )
         logger.info("打开标签: chromeTabId=%s url=%s", result["chromeTabId"], url)
         return result
 
@@ -78,7 +84,7 @@ class RemoteSession:
     ) -> CloseTabResult:
         logger.debug("关闭标签: chromeTabId=%s timeout=%s", chrome_tab_id, timeout)
         return await self._registry.call(
-            "close_tab", {"chromeTabId": chrome_tab_id}, timeout=timeout
+            "close_tab", {"chromeTabId": chrome_tab_id}, timeout=timeout, account_id=self._account_id,
         )
 
     async def activate_tab(
@@ -88,7 +94,7 @@ class RemoteSession:
     ) -> ActivateTabResult:
         logger.debug("激活标签: chromeTabId=%s timeout=%s", chrome_tab_id, timeout)
         result: ActivateTabResult = await self._registry.call(
-            "activate_tab", {"chromeTabId": chrome_tab_id}, timeout=timeout
+            "activate_tab", {"chromeTabId": chrome_tab_id}, timeout=timeout, account_id=self._account_id,
         )
         return result
 
@@ -99,22 +105,22 @@ class RemoteSession:
     ) -> ReloadTabResult:
         logger.debug("刷新标签: chromeTabId=%s timeout=%s", chrome_tab_id, timeout)
         return await self._registry.call(
-            "reload_tab", {"chromeTabId": chrome_tab_id}, timeout=timeout
+            "reload_tab", {"chromeTabId": chrome_tab_id}, timeout=timeout, account_id=self._account_id,
         )
 
     async def list_tabs(self) -> ListTabsResult:
         logger.debug("列出所有标签")
-        return await self._registry.call("list_tabs", {}, timeout=10.0)
+        return await self._registry.call("list_tabs", {}, timeout=10.0, account_id=self._account_id)
 
     def list_tracked_tabs(self) -> list[TabInfo]:
-        tabs = self._registry.tabs
-        logger.debug("获取已跟踪标签: %d 个", len(tabs))
+        tabs = self._registry.get_tabs(self._account_id)
+        logger.debug("获取已跟踪标签: account=%s %d 个", self._account_id, len(tabs))
         return tabs
 
     list_connected_tabs = list_tracked_tabs
 
     def get_tab(self, chrome_tab_id: int) -> TabInfo | None:
-        tab = self._registry.get_tab(chrome_tab_id)
+        tab = self._registry.get_tab_by_account(chrome_tab_id, self._account_id)
         logger.debug("获取标签: chromeTabId=%s found=%s", chrome_tab_id, tab is not None)
         return tab
 
@@ -138,7 +144,7 @@ class RemoteSession:
         logger.debug("执行JS: chromeTabId=%s execId=%s timeout=%s", chrome_tab_id, exec_id, timeout)
         logger.debug("JS代码长度: %d 字符", len(code))
         return await self._registry.call(
-            "execute", {"chromeTabId": chrome_tab_id, "execId": exec_id}, timeout=timeout
+            "execute", {"chromeTabId": chrome_tab_id, "execId": exec_id}, timeout=timeout, account_id=self._account_id,
         )
 
     @overload
@@ -235,7 +241,7 @@ class RemoteSession:
             "project": project,
             "return": return_,
         }
-        result = await self._registry.call("query", data, timeout=timeout)
+        result = await self._registry.call("query", data, timeout=timeout, account_id=self._account_id)
         if isinstance(result, dict):
             if "__error__" in result and result["__error__"]:
                 raise RuntimeError(f"查询失败: {result['__error__']}")
@@ -260,7 +266,7 @@ class RemoteSession:
             "filter": filter,
             "return": "bbox",
         }
-        result = await self._registry.call("query", data, timeout=timeout)
+        result = await self._registry.call("query", data, timeout=timeout, account_id=self._account_id)
         if isinstance(result, dict) and "data" in result:
             return result["data"]
         return result  # type: ignore[return-value]
@@ -273,7 +279,7 @@ class RemoteSession:
         """Dump 页面完整 HTML（document.documentElement.outerHTML）。"""
         logger.debug("Dump HTML: chromeTabId=%s timeout=%s", chrome_tab_id, timeout)
         return await self._registry.call(
-            "dump_html", {"chromeTabId": chrome_tab_id}, timeout=timeout
+            "dump_html", {"chromeTabId": chrome_tab_id}, timeout=timeout, account_id=self._account_id,
         )
 
 

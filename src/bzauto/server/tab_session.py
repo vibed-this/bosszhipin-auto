@@ -1,4 +1,4 @@
-"""TabSession：当前 tab 的操作代理。"""
+"""TabSession：当前 tab 的操作代理（支持多账号路由）。"""
 from __future__ import annotations
 
 import asyncio
@@ -21,16 +21,17 @@ log = logging.getLogger("boss.session")
 class TabSession:
     """当前 tab 的操作代理。
 
-    不管理服务器生命周期，不决定使用哪个 tab。
+    支持多账号路由，通过 account_id 自动路由到对应 Chrome profile。
     外部通过 ``set_current()`` 设置当前标签。
     """
 
-    def __init__(self, registry: TabRegistry | None = None) -> None:
+    def __init__(self, registry: TabRegistry | None = None, account_id: str = "main") -> None:
         if registry is None:
             from bzauto.server.lifecycle import get_registry
             registry = get_registry()
         self._registry = registry
-        self._rsession = RemoteSession(registry)
+        self._account_id = account_id
+        self._rsession = RemoteSession(registry, account_id)
         self._tab_id: int | None = None
 
     def set_current(self, chrome_tab_id: int) -> None:
@@ -49,6 +50,10 @@ class TabSession:
     def registry(self) -> TabRegistry:
         return self._registry
 
+    @property
+    def account_id(self) -> str:
+        return self._account_id
+
     def _require_tab(self) -> int:
         if self._tab_id is None:
             raise RuntimeError("未设置当前标签，请先调用 set_current()")
@@ -63,9 +68,9 @@ class TabSession:
             log.warning("标签激活失败: chromeTabId=%s", self._tab_id)
 
     def refresh_tab(self) -> int | None:
-        if self._tab_id is not None and self._registry.get_tab(self._tab_id):
+        if self._tab_id is not None and self._registry.get_tab_by_account(self._tab_id, self._account_id):
             return self._tab_id
-        tabs = self._registry.tabs
+        tabs = self._registry.get_tabs(self._account_id)
         if tabs:
             self._tab_id = tabs[-1]["chromeTabId"]
             log.info("切换到标签: chromeTabId=%s", self._tab_id)
@@ -180,5 +185,5 @@ class TabSession:
         """获取当前标签页的 URL。"""
         if self._tab_id is None:
             return None
-        tab = self._registry.get_tab(self._tab_id)
+        tab = self._registry.get_tab_by_account(self._tab_id, self._account_id)
         return tab["url"] if tab else None

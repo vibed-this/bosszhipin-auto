@@ -1,0 +1,297 @@
+"""数据管理窗口 — 投递记录 + 对话记录 CRUD。"""
+from __future__ import annotations
+
+import csv
+import os
+from typing import Any
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from bzauto.config import get_config
+from bzauto.storage import Storage
+
+
+class DataWindow(QWidget):
+    """数据管理窗口，包含投递记录和对话记录两个 tab。"""
+
+    def __init__(self, storage: Storage | None = None, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("数据管理")
+        self.setMinimumSize(900, 600)
+        self._storage = storage or Storage()
+        self._setup_ui()
+        self.refresh_all()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        self._tabs = QTabWidget()
+        layout.addWidget(self._tabs)
+
+        self._jobs_tab = QWidget()
+        self._tabs.addTab(self._jobs_tab, "投递记录")
+        self._build_jobs_tab()
+
+        self._conv_tab = QWidget()
+        self._tabs.addTab(self._conv_tab, "对话记录")
+        self._build_conv_tab()
+
+    def _build_jobs_tab(self):
+        layout = QVBoxLayout(self._jobs_tab)
+
+        toolbar = QHBoxLayout()
+        self._jobs_search = QLineEdit()
+        self._jobs_search.setPlaceholderText("搜索职位/公司...")
+        self._jobs_search.textChanged.connect(lambda: self._refresh_jobs())
+        self._jobs_status = QComboBox()
+        self._jobs_status.addItems(["全部", "已沟通", "HR已读", "HR已回复", "已邀面试", "已拒绝", "已结束"])
+        self._jobs_status.currentTextChanged.connect(lambda: self._refresh_jobs())
+        self._btn_export = QPushButton("导出 CSV")
+        self._btn_export.clicked.connect(self._export_jobs_csv)
+        self._btn_refresh = QPushButton("刷新")
+        self._btn_refresh.clicked.connect(self._refresh_jobs)
+        toolbar.addWidget(self._jobs_search)
+        toolbar.addWidget(self._jobs_status)
+        toolbar.addWidget(self._btn_export)
+        toolbar.addWidget(self._btn_refresh)
+        layout.addLayout(toolbar)
+
+        self._jobs_table = QTableWidget(0, 7)
+        self._jobs_table.setHorizontalHeaderLabels(["职位名", "公司", "薪资", "状态", "账号", "投递时间", "备注"])
+        self._jobs_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._jobs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._jobs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._jobs_table.customContextMenuRequested.connect(self._jobs_context_menu)
+        self._jobs_table.cellDoubleClicked.connect(self._jobs_cell_double_clicked)
+        layout.addWidget(self._jobs_table)
+
+        self._jobs_status_bar = QLabel()
+        layout.addWidget(self._jobs_status_bar)
+
+    def _build_conv_tab(self):
+        layout = QVBoxLayout(self._conv_tab)
+
+        toolbar = QHBoxLayout()
+        self._conv_search = QLineEdit()
+        self._conv_search.setPlaceholderText("搜索招聘者/公司...")
+        self._conv_search.textChanged.connect(lambda: self._refresh_convs())
+        self._conv_status = QComboBox()
+        self._conv_status.addItems(["全部", "新对话", "待回复", "已回复", "已读未回", "拒信", "邀约", "已删除", "已结束"])
+        self._conv_status.currentTextChanged.connect(lambda: self._refresh_convs())
+        self._conv_account = QComboBox()
+        self._conv_account.addItem("全部")
+        self._load_account_filter()
+        self._conv_account.currentTextChanged.connect(lambda: self._refresh_convs())
+        self._btn_conv_refresh = QPushButton("刷新")
+        self._btn_conv_refresh.clicked.connect(self._refresh_convs)
+        toolbar.addWidget(self._conv_search)
+        toolbar.addWidget(self._conv_status)
+        toolbar.addWidget(self._conv_account)
+        toolbar.addWidget(self._btn_conv_refresh)
+        layout.addLayout(toolbar)
+
+        self._conv_table = QTableWidget(0, 9)
+        self._conv_table.setHorizontalHeaderLabels([
+            "招聘者", "公司", "职位", "最后消息", "平台状态", "业务状态", "账号", "时间", "备注",
+        ])
+        self._conv_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self._conv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._conv_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._conv_table.customContextMenuRequested.connect(self._conv_context_menu)
+        self._conv_table.cellDoubleClicked.connect(self._conv_cell_double_clicked)
+        layout.addWidget(self._conv_table)
+
+        self._conv_status_bar = QLabel()
+        layout.addWidget(self._conv_status_bar)
+
+    def closeEvent(self, event):
+        self.hide()
+        event.ignore()
+
+    def refresh_all(self):
+        self._refresh_jobs()
+        self._refresh_convs()
+
+    def _refresh_jobs(self):
+        keyword = self._jobs_search.text().strip()
+        status = self._jobs_status.currentText()
+        if status == "全部":
+            status = ""
+        jobs = self._storage.search_jobs(keyword=keyword, status=status)
+        table = self._jobs_table
+        table.setRowCount(len(jobs))
+        for i, j in enumerate(jobs):
+            table.setItem(i, 0, QTableWidgetItem(j.get("title", "")))
+            table.setItem(i, 1, QTableWidgetItem(j.get("company", "")))
+            table.setItem(i, 2, QTableWidgetItem(j.get("salary_raw", "")))
+            table.setItem(i, 3, QTableWidgetItem(j.get("status", "")))
+            table.setItem(i, 4, QTableWidgetItem(j.get("account", "")))
+            table.setItem(i, 5, QTableWidgetItem(j.get("applied_at", "")[:16] if j.get("applied_at") else ""))
+            table.setItem(i, 6, QTableWidgetItem(j.get("note", "")))
+            table.item(i, 0).setData(Qt.ItemDataRole.UserRole, j.get("job_id", ""))
+        total = len(self._storage.search_jobs())
+        filtered = len(jobs)
+        self._jobs_status_bar.setText(f"总 {total} 条 | 筛选 {filtered} 条")
+
+    def _refresh_convs(self):
+        keyword = self._conv_search.text().strip()
+        status = self._conv_status.currentText()
+        if status == "全部":
+            status = ""
+        account = self._conv_account.currentText()
+        if account == "全部":
+            account = ""
+        convs = self._storage.search_conversations(keyword=keyword, status=status, account=account)
+        table = self._conv_table
+        table.setRowCount(len(convs))
+        for i, c in enumerate(convs):
+            table.setItem(i, 0, QTableWidgetItem(c.get("name", "")))
+            table.setItem(i, 1, QTableWidgetItem(c.get("company", "")))
+            table.setItem(i, 2, QTableWidgetItem(c.get("position", "")))
+            table.setItem(i, 3, QTableWidgetItem(c.get("last_msg", "")))
+            table.setItem(i, 4, QTableWidgetItem(c.get("platform_status", "")))
+            table.setItem(i, 5, QTableWidgetItem(c.get("status", "")))
+            table.setItem(i, 6, QTableWidgetItem(c.get("account", "")))
+            table.setItem(i, 7, QTableWidgetItem(c.get("last_updated", "")[:16] if c.get("last_updated") else ""))
+            table.setItem(i, 8, QTableWidgetItem(c.get("note", "")))
+            table.item(i, 0).setData(Qt.ItemDataRole.UserRole, c.get("conv_id", ""))
+            table.item(i, 0).setData(Qt.ItemDataRole.UserRole + 1, c.get("account", ""))
+
+    def _jobs_context_menu(self, pos):
+        item = self._jobs_table.itemAt(pos)
+        if item is None:
+            return
+        row = item.row()
+        job_id_item = self._jobs_table.item(row, 0)
+        job_id = job_id_item.data(Qt.ItemDataRole.UserRole) if job_id_item else ""
+        href_item = self._jobs_table.item(row, 1)
+        href = ""
+
+        menu = QMenu()
+        act_status = QAction("修改状态", self)
+        act_status.triggered.connect(lambda: self._edit_job_status(row, job_id))
+        act_note = QAction("修改备注", self)
+        act_note.triggered.connect(lambda: self._edit_job_note(row, job_id))
+        act_delete = QAction("删除记录", self)
+        act_delete.triggered.connect(lambda: self._delete_job(row, job_id))
+        menu.addAction(act_status)
+        menu.addAction(act_note)
+        menu.addAction(act_delete)
+        menu.exec(self._jobs_table.viewport().mapToGlobal(pos))
+
+    def _jobs_cell_double_clicked(self, row, col):
+        job_id_item = self._jobs_table.item(row, 0)
+        job_id = job_id_item.data(Qt.ItemDataRole.UserRole) if job_id_item else ""
+        if col == 3:
+            self._edit_job_status(row, job_id)
+        elif col == 6:
+            self._edit_job_note(row, job_id)
+
+    def _edit_job_status(self, row, job_id):
+        statuses = ["已沟通", "已打招呼", "HR已读", "HR已回复", "已邀面试", "已拒绝", "已结束"]
+        current = self._jobs_table.item(row, 3).text() if self._jobs_table.item(row, 3) else ""
+        new_status, ok = QInputDialog.getItem(self, "修改状态", "新状态:", statuses, current=statuses.index(current) if current in statuses else 0)
+        if ok and new_status:
+            self._storage.update_job_status(job_id, new_status)
+            self._refresh_jobs()
+
+    def _edit_job_note(self, row, job_id):
+        current = self._jobs_table.item(row, 6).text() if self._jobs_table.item(row, 6) else ""
+        new_note, ok = QInputDialog.getText(self, "修改备注", "备注:", text=current)
+        if ok:
+            self._storage.update_job_note(job_id, new_note)
+            self._refresh_jobs()
+
+    def _delete_job(self, row, job_id):
+        reply = QMessageBox.question(self, "确认删除", f"确定删除该记录？", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self._storage.delete_job(job_id)
+            self._refresh_jobs()
+
+    def _export_jobs_csv(self):
+        keyword = self._jobs_search.text().strip()
+        status = self._jobs_status.currentText()
+        if status == "全部":
+            status = ""
+        jobs = self._storage.search_jobs(keyword=keyword, status=status)
+        path, _ = QFileDialog.getSaveFileName(self, "导出 CSV", "jobs.csv", "CSV (*.csv)")
+        if not path:
+            return
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            writer = csv.DictWriter(f, fieldnames=["title", "company", "salary_raw", "status", "account", "applied_at", "href", "note"])
+            writer.writeheader()
+            for j in jobs:
+                writer.writerow({k: j.get(k, "") for k in writer.fieldnames})
+
+    def _conv_context_menu(self, pos):
+        item = self._conv_table.itemAt(pos)
+        if item is None:
+            return
+        row = item.row()
+        conv_id = item.data(Qt.ItemDataRole.UserRole) if item else ""
+        account = item.data(Qt.ItemDataRole.UserRole + 1) if item else ""
+
+        menu = QMenu()
+        act_status = QAction("修改状态", self)
+        act_status.triggered.connect(lambda: self._edit_conv_status(row, conv_id, account))
+        act_note = QAction("修改备注", self)
+        act_note.triggered.connect(lambda: self._edit_conv_note(row, conv_id, account))
+        act_delete = QAction("删除记录", self)
+        act_delete.triggered.connect(lambda: self._delete_conv(row, conv_id, account))
+        menu.addAction(act_status)
+        menu.addAction(act_note)
+        menu.addAction(act_delete)
+        menu.exec(self._conv_table.viewport().mapToGlobal(pos))
+
+    def _conv_cell_double_clicked(self, row, col):
+        conv_id_item = self._conv_table.item(row, 0)
+        conv_id = conv_id_item.data(Qt.ItemDataRole.UserRole) if conv_id_item else ""
+        account = conv_id_item.data(Qt.ItemDataRole.UserRole + 1) if conv_id_item else ""
+        if col == 5:
+            self._edit_conv_status(row, conv_id, account)
+        elif col == 8:
+            self._edit_conv_note(row, conv_id, account)
+
+    def _load_account_filter(self):
+        from bzauto.config import get_config
+        for a in get_config().accounts:
+            self._conv_account.addItem(a.id)
+
+    def _edit_conv_note(self, row, conv_id, account):
+        current = self._conv_table.item(row, 8).text() if self._conv_table.item(row, 8) else ""
+        new_note, ok = QInputDialog.getText(self, "修改备注", "备注:", text=current)
+        if ok:
+            self._storage.update_conv_note(conv_id, account, new_note)
+            self._refresh_convs()
+
+    def _edit_conv_status(self, row, conv_id, account):
+        statuses = ["新对话", "待回复", "已回复", "已读未回", "拒信", "邀约", "已删除", "已结束"]
+        current = self._conv_table.item(row, 5).text() if self._conv_table.item(row, 5) else ""
+        new_status, ok = QInputDialog.getItem(self, "修改状态", "新状态:", statuses, current=statuses.index(current) if current in statuses else 0)
+        if ok and new_status:
+            self._storage.update_conv_status(conv_id, account, new_status)
+            self._refresh_convs()
+
+    def _delete_conv(self, row, conv_id, account):
+        reply = QMessageBox.question(self, "确认删除", f"确定删除该记录？", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self._storage.delete_conversation(conv_id, account)
+            self._refresh_convs()

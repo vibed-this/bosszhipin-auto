@@ -43,6 +43,15 @@
             "justMyCode": true
         },
         {
+            "name": "boss-scrape-chat",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "bzauto.scrape_chat_auto",
+            "console": "integratedTerminal",
+            "args": [],
+            "justMyCode": true
+        },
+        {
             "name": "boss-delete-chat",
             "type": "debugpy",
             "request": "launch",

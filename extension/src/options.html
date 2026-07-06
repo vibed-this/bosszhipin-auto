@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Boss直聘远程控制 - 选项</title>
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; padding: 20px; width: 300px; }
+    label { display: block; margin-bottom: 6px; font-weight: bold; }
+    input { width: 100%; padding: 6px; box-sizing: border-box; margin-bottom: 12px; }
+    button { padding: 6px 16px; cursor: pointer; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .status { margin-top: 8px; font-size: 13px; transition: opacity 0.3s; }
+    .status.success { color: #2e7d32; }
+    .status.error { color: #c62828; }
+  </style>
+</head>
+<body>
+  <h3>账号配置</h3>
+  <label for="accountId">Account ID</label>
+  <input type="text" id="accountId" placeholder="例如: main, sub_1">
+  <button id="saveBtn">保存</button>
+  <div class="status" id="status"></div>
+  <script type="module" src="options.ts"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-import { initSocket, getSocket } from './socket';
+import { initSocket, getSocket, setOnConnected } from './socket';
 import { setupTabListeners, pushSyncState } from './tab-manager';
 import { registerHandlers } from './handlers';
 
@@ -8,8 +8,8 @@ const socket = initSocket();
 setupTabListeners();
 registerHandlers(socket);
 
-// 连接成功后推送同步状态
-socket.on('connect', () => {
+// account_id 注册完成后推送同步状态（避免竞态）
+setOnConnected(() => {
   pushSyncState();
 });
 

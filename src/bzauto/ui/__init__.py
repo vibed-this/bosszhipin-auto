@@ -12,11 +12,13 @@ from typing import Any
 
 import keyboard
 
-from PySide6.QtCore import Signal, QObject
+from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtWidgets import QApplication
 
 from bzauto.ui.control_panel import ControlPanel
 from bzauto.ui.log_window import LogWindow
+from bzauto.ui.config_dialog import ConfigDialog
+from bzauto.ui.data_window import DataWindow
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
@@ -24,7 +26,10 @@ from bzauto.flows.scrape_only import BossScrapeOnlyFlow
 from bzauto.flows.scrape import BossScrapeFlow
 from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.server.tab_session import TabSession
-from bzauto.server.lifecycle import start_server
+from bzauto.server.lifecycle import start_server, get_registry
+from bzauto.storage import Storage
+from bzauto.task_runner import TaskRunner
+from bzauto.scheduler import BzScheduler
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -39,6 +44,7 @@ class _TaskBridge(QObject):
     """跨线程信号桥：后台线程 → Qt 主线程。"""
 
     buttons_enabled = Signal(bool)
+    data_updated = Signal()
 
 
 class BzAutoApp:
@@ -48,8 +54,10 @@ class BzAutoApp:
         self._app = QApplication(sys.argv)
         self._app.setQuitOnLastWindowClosed(True)
 
+        self._storage = Storage()
         self._control = ControlPanel()
         self._log_win = LogWindow()
+        self._data_win: DataWindow | None = None
         self._bridge = _TaskBridge()
 
         # 后台线程 + event loop（所有异步操作在此执行）
@@ -59,6 +67,9 @@ class BzAutoApp:
 
         # 任务状态
         self._current_task: asyncio.Future | None = None
+        self._task_runner: TaskRunner | None = None
+        self._scheduler: BzScheduler | None = None
+        self._config_dlg: ConfigDialog | None = None
 
         self._setup_ui()
 
@@ -71,7 +82,19 @@ class BzAutoApp:
     def _run_bg_loop(self) -> None:
         """后台线程入口：运行 event loop。"""
         asyncio.set_event_loop(self._loop)
+        # 初始化 TaskRunner 和 Scheduler
+        self._task_runner = TaskRunner(self._loop)
+        self._scheduler = BzScheduler(self._task_runner, self._loop, self._storage)
+        self._loop.call_soon(self._init_scheduler)
         self._loop.run_forever()
+
+    async def _init_scheduler(self) -> None:
+        """启动时恢复 + 启动调度器。"""
+        await start_server()
+        self._storage.release_stale_claims()
+        self._storage.reset_daily_counts_if_new_day()
+        self._scheduler.start()
+        log.info("系统启动完成: 调度器已运行")
 
     def _setup_ui(self) -> None:
         """配置 UI 布局和信号。"""
@@ -90,6 +113,7 @@ class BzAutoApp:
 
         # 跨线程信号连接
         self._bridge.buttons_enabled.connect(self._control.set_buttons_enabled)
+        self._bridge.data_updated.connect(self._on_data_updated)
 
         # 全局退出快捷键
         keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
@@ -100,57 +124,61 @@ class BzAutoApp:
         self._control.btn_delete_chat.clicked.connect(lambda: self._on_delete_chat())
         self._control.btn_dump.clicked.connect(lambda: self._on_scrape_jobs())
         self._control.btn_batch.clicked.connect(lambda: self._on_batch_chat())
+        self._control.btn_config.clicked.connect(self._on_open_config)
+        self._control.btn_data.clicked.connect(self._on_open_data)
+
+    def _on_open_config(self) -> None:
+        self._config_dlg = ConfigDialog(self._control)
+        self._config_dlg.finished.connect(self._config_dlg.deleteLater)
+        self._config_dlg.finished.connect(self._on_config_closed)
+        self._config_dlg.open()
+
+    def _on_config_closed(self) -> None:
+        self._config_dlg = None
+
+    def _on_open_data(self) -> None:
+        if self._data_win is None:
+            self._data_win = DataWindow(self._storage)
+        self._data_win.show()
+        self._data_win.raise_()
+        self._data_win.refresh_all()
+
+    def _on_data_updated(self) -> None:
+        if self._data_win is not None and self._data_win.isVisible():
+            self._data_win.refresh_all()
 
     def _on_scrape_chat(self) -> None:
         """聊天爬取。"""
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
-
         async def _task() -> None:
             session = TabSession()
             page = BossChatListPage(session)
-            flow = BossScrapeChatFlow(page, session)
-            out_file = output_dir / f"chat_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"
-            data = await flow.run(max_scrolls=0, output=out_file)
-            log.info("聊天爬取完成: %d 条记录 -> %s", len(data), out_file)
+            flow = BossScrapeChatFlow(page, session, "main", self._storage)
+            result = await flow.run(max_scrolls=0)
+            log.info("聊天爬取完成: %d 条", len(result.get("items", [])))
 
         self._run_task(_task)
 
     def _on_scrape_jobs(self) -> None:
         """职位爬取（纯抓取，不沟通）。"""
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
-
         async def _task() -> None:
             session = TabSession()
             page = BossJobListPage(session)
-            flow = BossScrapeOnlyFlow(page, session)
+            flow = BossScrapeOnlyFlow(page, session, "main", self._storage)
             jobs = await flow.run(max_scrolls=10)
-            out_file = output_dir / f"jobs_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"
-            out_file.write_text(
-                json.dumps([j.to_dict() for j in jobs], ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            log.info("职位爬取完成: %d 条 -> %s", len(jobs), out_file)
+            log.info("职位爬取完成: %d 条 -> DB", len(jobs))
+            self._bridge.data_updated.emit()
 
         self._run_task(_task)
 
     def _on_batch_chat(self) -> None:
         """批量沟通（抓取 + 自动沟通）。"""
-        output_dir = Path("output")
-        output_dir.mkdir(exist_ok=True)
-
         async def _task() -> None:
             session = TabSession()
             page = BossJobListPage(session)
-            flow = BossScrapeFlow(page, session)
+            flow = BossScrapeFlow(page, session, "main", self._storage)
             jobs = await flow.run(max_scrolls=10)
-            out_file = output_dir / f"batch_{datetime.datetime.now():%Y%m%d_%H%M%S}.json"
-            out_file.write_text(
-                json.dumps([j.to_dict() for j in jobs], ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-            log.info("批量沟通完成: %d 条 -> %s", len(jobs), out_file)
+            log.info("批量沟通完成: %d 条 -> DB", len(jobs))
+            self._bridge.data_updated.emit()
 
         self._run_task(_task)
 
@@ -159,9 +187,10 @@ class BzAutoApp:
         async def _task() -> None:
             session = TabSession()
             page = BossChatListPage(session)
-            flow = BossDeleteChatFlow(page, session)
+            flow = BossDeleteChatFlow(page, session, "main", self._storage)
             result = await flow.run(dry_run=False)
             log.info("聊天删拒完成: 共删除 %d 条", len(result))
+            self._bridge.data_updated.emit()
 
         self._run_task(_task)
 

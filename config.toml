@@ -1,0 +1,73 @@
+[server]
+host = "127.0.0.1"
+port = 8765
+
+[storage]
+db_path = "data/bzauto.tinydb"
+
+[scrape]
+scroll_timeout = 5.0
+page_load_timeout = 20.0
+
+[scrape.filter]
+whitelist = [
+    "前端",
+    "全栈",
+    "Web",
+]
+blacklist = [
+    "出差",
+]
+min_salary = 5
+max_salary = 7
+
+[delete]
+keywords = [
+    "抱歉",
+    "不好意思",
+    "对不起",
+    "不合适",
+    "不太合适",
+    "荣幸",
+]
+
+[follow_up]
+enabled = false
+days_threshold = 50
+
+[schedule]
+scrape_time = "08:00"
+dispatch_times = [
+    "09:00",
+    "14:00",
+    "19:00",
+]
+dispatch_batch_size = 50
+scan_interval_minutes = 60
+claim_timeout_minutes = 30
+
+[notification]
+enabled = true
+merge = true
+
+[notification.napcat]
+base_url = "http://10.0.0.2:7778/"
+msg_type = "group"
+target_id = 1053912594
+token = "12345678"
+
+[[accounts]]
+id = "main"
+name = "主账号"
+profile = "Default"
+daily_limit = 150
+enabled = true
+role = "scraper"
+
+[[accounts]]
+id = "sub_1"
+name = "子账号1"
+profile = "Profile 1"
+daily_limit = 150
+enabled = true
+role = "dispatcher"

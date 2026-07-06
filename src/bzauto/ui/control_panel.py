@@ -63,6 +63,25 @@ class ControlPanel(QWidget):
         sep2.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep2)
 
+        # Button: 配置
+        layout.addSpacing(2)
+        self.btn_config = QPushButton("配置")
+        self.btn_config.setFixedHeight(28)
+        layout.addWidget(self.btn_config)
+
+        # Button: 数据
+        layout.addSpacing(2)
+        self.btn_data = QPushButton("数据")
+        self.btn_data.setFixedHeight(28)
+        layout.addWidget(self.btn_data)
+
+        # Separator
+        layout.addSpacing(4)
+        sep3 = QFrame()
+        sep3.setFrameShape(QFrame.Shape.HLine)
+        sep3.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep3)
+
         # Button: 退出 (Ctrl+E)
         layout.addSpacing(2)
         self.btn_exit = QPushButton("退出 (Ctrl+E)")

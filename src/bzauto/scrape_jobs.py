@@ -22,6 +22,7 @@ import sys
 
 import keyboard
 
+from bzauto.config import get_config
 from bzauto.models import JobCard
 from bzauto.server.tab_session import TabSession
 from bzauto.server.lifecycle import start_server, stop_server
@@ -38,14 +39,16 @@ class BossJobsAuto:
         self,
         session: TabSession | None = None,
         *,
-        host: str = "127.0.0.1",
-        port: int = 8765,
+        host: str | None = None,
+        port: int | None = None,
+        account_id: str = "main",
     ) -> None:
-        self._host = host
-        self._port = port
-        self.session = session or TabSession()
+        cfg = get_config()
+        self._host = host or cfg.server.host
+        self._port = port or cfg.server.port
+        self.session = session or TabSession(account_id=account_id)
         self.page = BossJobListPage(self.session)
-        self.flow = BossScrapeFlow(self.page, self.session)
+        self.flow = BossScrapeFlow(self.page, self.session, account_id)
 
     async def run(
         self,
