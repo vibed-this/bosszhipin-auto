@@ -19,9 +19,22 @@ from __future__ import annotations
 
 import logging
 import uuid
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, overload
 
+from bzauto.protocol.types import (
+    ActivateTabResult,
+    BboxResult,
+    CloseTabResult,
+    ListTabsResult,
+    OpenTabResult,
+    QueryFilter,
+    QueryReturn,
+    RawElement,
+    ReloadTabResult,
+    TabEvent,
+    TabInfo,
+)
 from bzauto.server.registry import TabRegistry
 
 logger = logging.getLogger("boss.api")
@@ -38,11 +51,11 @@ class RemoteSession:
     def __init__(self, registry: "TabRegistry") -> None:
         self._registry = registry
 
-    def on(self, event: str, callback: Callable) -> None:
+    def on(self, event: str, callback: Callable[[TabEvent], Any]) -> None:
         logger.debug("注册事件监听: event=%s", event)
         self._registry.on(event, callback)
 
-    def off(self, event: str, callback: Callable | None = None) -> None:
+    def off(self, event: str, callback: Callable[[TabEvent], Any] | None = None) -> None:
         logger.debug("移除事件监听: event=%s", event)
         self._registry.off(event, callback)
 
@@ -50,19 +63,19 @@ class RemoteSession:
         self,
         url: str,
         timeout: float = 15.0,
-    ) -> dict[str, Any]:
+    ) -> OpenTabResult:
         logger.debug("打开标签: url=%s timeout=%s", url, timeout)
         if not self._registry.is_connected():
             raise ConnectionError("扩展后台未连接")
-        result = await self._registry.call("open_tab", {"url": url}, timeout=timeout)
-        logger.info("打开标签: chromeTabId=%s url=%s", result.get("chromeTabId"), url)
+        result: OpenTabResult = await self._registry.call("open_tab", {"url": url}, timeout=timeout)
+        logger.info("打开标签: chromeTabId=%s url=%s", result["chromeTabId"], url)
         return result
 
     async def close_tab(
         self,
         chrome_tab_id: int,
         timeout: float = 10.0,
-    ) -> dict[str, Any]:
+    ) -> CloseTabResult:
         logger.debug("关闭标签: chromeTabId=%s timeout=%s", chrome_tab_id, timeout)
         return await self._registry.call(
             "close_tab", {"chromeTabId": chrome_tab_id}, timeout=timeout
@@ -72,37 +85,35 @@ class RemoteSession:
         self,
         chrome_tab_id: int,
         timeout: float = 10.0,
-    ) -> bool:
+    ) -> ActivateTabResult:
         logger.debug("激活标签: chromeTabId=%s timeout=%s", chrome_tab_id, timeout)
-        result = await self._registry.call(
+        result: ActivateTabResult = await self._registry.call(
             "activate_tab", {"chromeTabId": chrome_tab_id}, timeout=timeout
         )
-        if isinstance(result, dict):
-            return result.get("success", False)
-        return bool(result)
+        return result
 
     async def reload_tab(
         self,
         chrome_tab_id: int,
         timeout: float = 15.0,
-    ) -> dict[str, Any]:
+    ) -> ReloadTabResult:
         logger.debug("刷新标签: chromeTabId=%s timeout=%s", chrome_tab_id, timeout)
         return await self._registry.call(
             "reload_tab", {"chromeTabId": chrome_tab_id}, timeout=timeout
         )
 
-    async def list_tabs(self) -> list[dict[str, Any]]:
+    async def list_tabs(self) -> ListTabsResult:
         logger.debug("列出所有标签")
         return await self._registry.call("list_tabs", {}, timeout=10.0)
 
-    def list_tracked_tabs(self) -> list[dict[str, Any]]:
+    def list_tracked_tabs(self) -> list[TabInfo]:
         tabs = self._registry.tabs
         logger.debug("获取已跟踪标签: %d 个", len(tabs))
         return tabs
 
     list_connected_tabs = list_tracked_tabs
 
-    def get_tab(self, chrome_tab_id: int) -> dict[str, Any] | None:
+    def get_tab(self, chrome_tab_id: int) -> TabInfo | None:
         tab = self._registry.get_tab(chrome_tab_id)
         logger.debug("获取标签: chromeTabId=%s found=%s", chrome_tab_id, tab is not None)
         return tab
@@ -130,13 +141,86 @@ class RemoteSession:
             "execute", {"chromeTabId": chrome_tab_id, "execId": exec_id}, timeout=timeout
         )
 
+    @overload
     async def query(
         self,
         chrome_tab_id: int,
         select: str,
-        filter: dict | None = None,
-        project: dict | None = None,
-        return_: str = "list",
+        *,
+        filter: QueryFilter | None = ...,
+        project: Mapping[str, str | list[str]] | None = ...,
+        return_: Literal["bbox"] = ...,
+        timeout: float = ...,
+    ) -> BboxResult | None: ...
+
+    @overload
+    async def query(
+        self,
+        chrome_tab_id: int,
+        select: str,
+        *,
+        filter: QueryFilter | None = ...,
+        project: Mapping[str, str | list[str]] | None = ...,
+        return_: Literal["bboxList"] = ...,
+        timeout: float = ...,
+    ) -> list[BboxResult]: ...
+
+    @overload
+    async def query(
+        self,
+        chrome_tab_id: int,
+        select: str,
+        *,
+        filter: QueryFilter | None = ...,
+        project: Mapping[str, str | list[str]] | None = ...,
+        return_: Literal["list"] = ...,
+        timeout: float = ...,
+    ) -> list[dict[str, Any]]: ...
+
+    @overload
+    async def query(
+        self,
+        chrome_tab_id: int,
+        select: str,
+        *,
+        filter: QueryFilter | None = ...,
+        project: Mapping[str, str | list[str]] | None = ...,
+        return_: Literal["first"] = ...,
+        timeout: float = ...,
+    ) -> dict[str, Any] | None: ...
+
+    @overload
+    async def query(
+        self,
+        chrome_tab_id: int,
+        select: str,
+        *,
+        filter: QueryFilter | None = ...,
+        project: Mapping[str, str | list[str]] | None = ...,
+        return_: Literal["count"] = ...,
+        timeout: float = ...,
+    ) -> int: ...
+
+    @overload
+    async def query(
+        self,
+        chrome_tab_id: int,
+        select: str,
+        *,
+        filter: QueryFilter | None = ...,
+        project: Mapping[str, str | list[str]] | None = ...,
+        return_: Literal["raw"] = ...,
+        timeout: float = ...,
+    ) -> list[RawElement]: ...
+
+    async def query(
+        self,
+        chrome_tab_id: int,
+        select: str,
+        *,
+        filter: QueryFilter | None = None,
+        project: Mapping[str, str | list[str]] | None = None,
+        return_: QueryReturn = "list",
         timeout: float = 30.0,
     ) -> Any:
         logger.debug("DOM查询: chromeTabId=%s select=%s return=%s", chrome_tab_id, select, return_)
@@ -152,20 +236,24 @@ class RemoteSession:
             "return": return_,
         }
         result = await self._registry.call("query", data, timeout=timeout)
-        if isinstance(result, dict) and "data" in result:
-            data = result["data"]
-            data_str = str(data) if data else "None"
-            logger.debug("查询结果: %s", data_str[:200] if len(data_str) > 200 else data_str)
-            return data
+        if isinstance(result, dict):
+            if "__error__" in result and result["__error__"]:
+                raise RuntimeError(f"查询失败: {result['__error__']}")
+            if "data" in result:
+                data_result = result["data"]
+                data_str = str(data_result) if data_result else "None"
+                logger.debug("查询结果: %s", data_str[:200] if len(data_str) > 200 else data_str)
+                return data_result
         return result
 
     async def bbox(
         self,
         chrome_tab_id: int,
         select: str,
-        filter: dict | None = None,
+        *,
+        filter: QueryFilter | None = None,
         timeout: float = 30.0,
-    ) -> dict | None:
+    ) -> BboxResult | None:
         logger.debug("获取元素坐标: chromeTabId=%s select=%s", chrome_tab_id, select)
         if filter:
             logger.debug("坐标过滤器: %s", filter)
@@ -178,7 +266,7 @@ class RemoteSession:
         result = await self._registry.call("query", data, timeout=timeout)
         if isinstance(result, dict) and "data" in result:
             return result["data"]
-        return result
+        return result  # type: ignore[return-value]
 
     async def dump_html(
         self,
@@ -190,3 +278,6 @@ class RemoteSession:
         return await self._registry.call(
             "dump_html", {"chromeTabId": chrome_tab_id}, timeout=timeout
         )
+
+
+from typing import Literal  # noqa: E402

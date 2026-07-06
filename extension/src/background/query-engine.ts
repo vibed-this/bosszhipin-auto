@@ -1,37 +1,19 @@
-interface QueryArgs {
+import { QueryFilter, BboxResult, QueryMeta, RawElement } from '../protocol/types';
+
+interface QueryEngineArgs {
   select: string;
-  filter?: {
-    textContains?: string;
-    textAny?: string | string[];
-    textNone?: string | string[];
-    nth?: 'last';
-    index?: number;
-  };
+  filter?: QueryFilter;
   project?: Record<string, string | string[]>;
   return: 'bbox' | 'bboxList' | 'list' | 'first' | 'count' | 'raw';
 }
 
-interface BboxCoords {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  cx: number;
-  cy: number;
-}
-
-interface BboxResult {
-  css: BboxCoords;
-  physical: BboxCoords;
-}
-
-interface QueryResult {
+interface QueryEngineResult {
   data: any;
-  _meta?: any;
+  _meta?: QueryMeta;
   __error__?: string;
 }
 
-export function queryEngine(args: QueryArgs): QueryResult {
+export function queryEngine(args: QueryEngineArgs): QueryEngineResult {
   function bboxOf(el: Element): BboxResult {
     const rect = el.getBoundingClientRect();
     const borderThickness = (window.outerWidth - window.innerWidth) / 2;
@@ -79,7 +61,7 @@ export function queryEngine(args: QueryArgs): QueryResult {
     }
   }
 
-  function applyFilter(all: Element[], filter?: QueryArgs['filter']): Element[] {
+  function applyFilter(all: Element[], filter?: QueryFilter): Element[] {
     if (!filter) return all;
     let result = all;
     if (filter.textContains) {
@@ -164,7 +146,7 @@ export function queryEngine(args: QueryArgs): QueryResult {
         data = matched.length;
         break;
       case 'raw':
-        data = matched.map((el) => ({
+        data = matched.map((el): RawElement => ({
           text: (el.textContent || '').trim(),
           html: el.outerHTML,
         }));
@@ -182,6 +164,6 @@ export function queryEngine(args: QueryArgs): QueryResult {
       },
     };
   } catch (e) {
-    return { data: null, _meta: null, __error__: String(e) };
+    return { data: null, _meta: undefined, __error__: String(e) };
   }
 }

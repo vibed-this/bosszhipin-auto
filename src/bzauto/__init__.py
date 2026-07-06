@@ -1,3 +1,4 @@
+from bzauto.models import JobCard, ChatItem
 from bzauto.server.registry import TabRegistry, ElementNotFound
 from bzauto.server.remote_session import RemoteSession
 from bzauto.server.tab_session import TabSession
@@ -11,6 +12,8 @@ from bzauto.server.lifecycle import (
 )
 
 __all__ = [
+    "JobCard",
+    "ChatItem",
     "TabRegistry",
     "ElementNotFound",
     "RemoteSession",

@@ -7,7 +7,12 @@ from typing import Any
 
 import pyautogui
 
-from bzauto.server.registry import TabRegistry
+from bzauto.protocol.types import (
+    BboxResult,
+    QueryFilter,
+    QueryReturn,
+)
+from bzauto.server.registry import ElementNotFound, TabRegistry
 from bzauto.server.remote_session import RemoteSession
 
 log = logging.getLogger("boss.session")
@@ -95,9 +100,9 @@ class TabSession:
         self,
         select: str,
         *,
-        filter: dict | None = None,
-        project: dict | None = None,
-        return_: str = "list",
+        filter: QueryFilter | None = None,
+        project: dict[str, str | list[str]] | None = None,
+        return_: QueryReturn = "list",
         timeout: float = 30.0,
     ) -> Any:
         return await self._rsession.query(
@@ -109,9 +114,9 @@ class TabSession:
         self,
         select: str,
         *,
-        filter: dict | None = None,
+        filter: QueryFilter | None = None,
         timeout: float = 30.0,
-    ) -> dict | None:
+    ) -> BboxResult | None:
         return await self._rsession.bbox(self._require_tab(), select, filter=filter, timeout=timeout)
 
     async def dump_html(self, timeout: float = 30.0) -> str | None:
@@ -127,16 +132,16 @@ class TabSession:
         self,
         select: str,
         *,
-        filter: dict | None = None,
+        filter: QueryFilter | None = None,
         wait_visible: str | None = None,
         wait_hidden: str | None = None,
         timeout: float = 30.0,
         post_sleep: float = 0.5,
-    ) -> bool:
-        """bbox → 激活 → 点击 → 可选等待。返回是否成功。"""
+    ) -> None:
+        """bbox → 激活 → 点击 → 可选等待。成功无返回，失败抛 ElementNotFound。"""
         bbox = await self.bbox(select, filter=filter, timeout=timeout)
         if bbox is None or bbox.get("css", {}).get("cx", 0) <= 0:
-            return False
+            raise ElementNotFound(select, filter)
         await self.click(bbox["physical"]["cx"], bbox["physical"]["cy"])
         await asyncio.sleep(post_sleep)
         if wait_visible:
@@ -153,7 +158,6 @@ class TabSession:
                 if check is None:
                     break
                 await asyncio.sleep(0.3)
-        return True
 
     async def scroll_wheel(
         self,
@@ -177,4 +181,4 @@ class TabSession:
         if self._tab_id is None:
             return None
         tab = self._registry.get_tab(self._tab_id)
-        return tab.get("url") if tab else None
+        return tab["url"] if tab else None

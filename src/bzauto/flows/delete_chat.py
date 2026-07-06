@@ -4,9 +4,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import Any
 
 from bzauto.flows.base import BaseFlow
+from bzauto.models import ChatItem
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.server.tab_session import TabSession
 
@@ -40,45 +40,50 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
         url: str | None = None,
         *,
         dry_run: bool = True,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ChatItem]:
         from bzauto.pages.chat_list import _CHAT_URL
 
         await self._setup(url or _CHAT_URL, reuse_existing=True)
 
         processed: set[tuple[str, str]] = set()
-        deleted: list[dict[str, Any]] = []
+        deleted: list[ChatItem] = []
 
         async for item, idx in self._page.iter_chat_items():
-            status = item.get("status", "")
-            last_msg = item.get("lastMsg", "")
-            key = (item.get("name", ""), item.get("company", ""))
+            if item.name and item.company:
+                key = (item.name, item.company)
+            else:
+                key = ("", "")
 
-            if key not in processed and _should_delete(status, last_msg):
+            if key not in processed and _should_delete(item.status, item.lastMsg):
                 processed.add(key)
-                log.info("--- 处理 #%d: %s ---", idx, item.get("name"))
+                log.info("--- 处理 #%d: %s ---", idx, item.name)
 
-                ok = await self._page.click_chat_item(idx)
-                if not ok:
+                try:
+                    await self._page.click_chat_item(idx)
+                except Exception:
                     continue
                 await asyncio.sleep(random.uniform(0.5, 1.0))
 
-                ok = await self._page.click_more_button()
-                if not ok:
+                try:
+                    await self._page.click_more_button()
+                except Exception:
                     continue
                 await asyncio.sleep(random.uniform(0.3, 0.6))
 
-                ok = await self._page.click_delete_in_menu()
-                if not ok:
+                try:
+                    await self._page.click_delete_in_menu()
+                except Exception:
                     continue
                 await asyncio.sleep(random.uniform(0.5, 1.0))
 
-                if dry_run:
-                    log.info("[DRY RUN] 点击取消")
-                    ok = await self._page.click_cancel_in_dialog()
-                else:
-                    log.info("点击确定")
-                    ok = await self._page.click_confirm_in_dialog()
-                if not ok:
+                try:
+                    if dry_run:
+                        log.info("[DRY RUN] 点击取消")
+                        await self._page.click_cancel_in_dialog()
+                    else:
+                        log.info("点击确定")
+                        await self._page.click_confirm_in_dialog()
+                except Exception:
                     log.warning("对话框操作失败")
 
                 await asyncio.sleep(random.uniform(0.5, 1.0))
@@ -110,7 +115,7 @@ async def _main() -> None:
     result = await flow.run(dry_run=True)
     log.info("dry run 结果: %d 条", len(result))
     for r in result:
-        log.info("  %s - %s", r.get("name"), r.get("lastMsg"))
+        log.info("  %s - %s", r.name, r.lastMsg)
 
 
 if __name__ == "__main__":

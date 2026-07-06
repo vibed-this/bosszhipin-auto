@@ -1,13 +1,24 @@
 import { Socket } from 'socket.io-client';
 import { executeInIsolatedWorld } from './execute';
 import { queryEngine } from './query-engine';
+import {
+  Ack,
+  COMMAND_NAMES,
+  EVENT_NAMES,
+  QueryFilter,
+  OpenTabArgs,
+  CloseTabArgs,
+  ActivateTabArgs,
+  ReloadTabArgs,
+  ExecuteArgs,
+  QueryCommandArgs,
+  DumpHtmlArgs,
+} from '../protocol/types';
 
 const HTTP_BASE = 'http://127.0.0.1:8765';
 
-type Ack = (result: any) => void;
-
 export function registerHandlers(socket: Socket): void {
-  socket.on('open_tab', async (data: { url: string }, ack: Ack) => {
+  socket.on(COMMAND_NAMES.OPEN_TAB, async (data: OpenTabArgs, ack: Ack) => {
     try {
       console.debug('[BossRemote] 打开标签: url=' + data.url);
       const tab = await chrome.tabs.create({ url: data.url });
@@ -19,7 +30,7 @@ export function registerHandlers(socket: Socket): void {
     }
   });
 
-  socket.on('close_tab', async (data: { chromeTabId: number }, ack: Ack) => {
+  socket.on(COMMAND_NAMES.CLOSE_TAB, async (data: CloseTabArgs, ack: Ack) => {
     try {
       console.debug('[BossRemote] 关闭标签: chromeTabId=' + data.chromeTabId);
       await chrome.tabs.remove(data.chromeTabId);
@@ -31,7 +42,7 @@ export function registerHandlers(socket: Socket): void {
     }
   });
 
-  socket.on('activate_tab', async (data: { chromeTabId: number }, ack: Ack) => {
+  socket.on(COMMAND_NAMES.ACTIVATE_TAB, async (data: ActivateTabArgs, ack: Ack) => {
     try {
       console.debug('[BossRemote] 激活标签窗口: chromeTabId=' + data.chromeTabId);
       const tab = await chrome.tabs.get(data.chromeTabId);
@@ -50,7 +61,7 @@ export function registerHandlers(socket: Socket): void {
     }
   });
 
-  socket.on('reload_tab', async (data: { chromeTabId: number }, ack: Ack) => {
+  socket.on(COMMAND_NAMES.RELOAD_TAB, async (data: ReloadTabArgs, ack: Ack) => {
     try {
       console.debug('[BossRemote] 刷新标签: chromeTabId=' + data.chromeTabId);
       await chrome.tabs.reload(data.chromeTabId);
@@ -62,7 +73,7 @@ export function registerHandlers(socket: Socket): void {
     }
   });
 
-  socket.on('list_tabs', async (_data: any, ack: Ack) => {
+  socket.on(COMMAND_NAMES.LIST_TABS, async (_data: Record<string, never>, ack: Ack) => {
     try {
       console.debug('[BossRemote] 查询所有标签...');
       const tabs = await chrome.tabs.query({});
@@ -70,6 +81,7 @@ export function registerHandlers(socket: Socket): void {
         chromeTabId: tab.id,
         url: tab.url || '',
         title: tab.title || '',
+        status: tab.status || 'complete',
         active: tab.active,
         windowId: tab.windowId,
       }));
@@ -81,7 +93,7 @@ export function registerHandlers(socket: Socket): void {
     }
   });
 
-  socket.on('execute', async (data: { chromeTabId: number; execId: string }, ack: Ack) => {
+  socket.on(COMMAND_NAMES.EXECUTE, async (data: ExecuteArgs, ack: Ack) => {
     try {
       console.debug('[BossRemote] 执行JS: chromeTabId=' + data.chromeTabId + ' execId=' + data.execId);
       const results = await chrome.scripting.executeScript({
@@ -98,13 +110,7 @@ export function registerHandlers(socket: Socket): void {
     }
   });
 
-  socket.on('query', async (data: {
-    chromeTabId: number;
-    select: string;
-    filter?: any;
-    project?: any;
-    return?: string;
-  }, ack: Ack) => {
+  socket.on(COMMAND_NAMES.QUERY, async (data: QueryCommandArgs, ack: Ack) => {
     try {
       console.debug('[BossRemote] 执行DOM查询: tab=' + data.chromeTabId + ' select=' + data.select + ' return=' + (data.return || 'list'));
       console.debug('[BossRemote] 查询参数:', JSON.stringify({ filter: data.filter, project: data.project }));
@@ -114,9 +120,9 @@ export function registerHandlers(socket: Socket): void {
         func: queryEngine,
         args: [{
           select: data.select,
-          filter: data.filter || null,
-          project: data.project || null,
-          return: (data.return || 'list') as any,
+          filter: data.filter || undefined,
+          project: data.project || undefined,
+          return: data.return || 'list',
         }],
       });
       const result = results[0]?.result;
@@ -133,7 +139,7 @@ export function registerHandlers(socket: Socket): void {
     }
   });
 
-  socket.on('dump_html', async (data: { chromeTabId: number }, ack: Ack) => {
+  socket.on(COMMAND_NAMES.DUMP_HTML, async (data: DumpHtmlArgs, ack: Ack) => {
     try {
       console.debug('[BossRemote] Dump HTML: chromeTabId=' + data.chromeTabId);
       const results = await chrome.scripting.executeScript({

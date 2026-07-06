@@ -19,10 +19,10 @@ import asyncio
 import logging
 import os
 import sys
-from typing import Any
 
 import keyboard
 
+from bzauto.models import JobCard
 from bzauto.server.tab_session import TabSession
 from bzauto.server.lifecycle import start_server, stop_server
 from bzauto.pages.job_list import BossJobListPage
@@ -52,7 +52,7 @@ class BossJobsAuto:
         url: str | None = None,
         max_scrolls: int = 10,
         reuse_existing: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> list[JobCard]:
         return await self.flow.run(url, max_scrolls=max_scrolls, reuse_existing=reuse_existing)
 
     async def __aenter__(self) -> BossJobsAuto:

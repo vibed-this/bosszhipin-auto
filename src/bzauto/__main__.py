@@ -2,30 +2,31 @@ import asyncio
 import json
 import logging
 
+from bzauto.protocol.types import TabReadyEvent, TabChangedEvent, TabGoneEvent
 from bzauto.server import start_server, TabSession
 
 log = logging.getLogger("main")
 
 
-def print_tab_ready(msg: dict) -> None:
+def print_tab_ready(msg: TabReadyEvent) -> None:
     print(
-        f"\n[+] 标签就绪  chromeTabId={msg.get('chromeTabId')}  "
-        f"source={msg.get('source')}  "
+        f"\n[+] 标签就绪  chromeTabId={msg['chromeTabId']}  "
+        f"source={msg['source']}  "
         f"{msg.get('title', '')}  {msg.get('url', '')}"
     )
 
 
-def print_tab_changed(msg: dict) -> None:
+def print_tab_changed(msg: TabChangedEvent) -> None:
     print(
-        f"\n[*] 标签变化  chromeTabId={msg.get('chromeTabId')}  "
+        f"\n[*] 标签变化  chromeTabId={msg['chromeTabId']}  "
         f"changes={msg.get('changes', {})}"
     )
 
 
-def print_tab_gone(msg: dict) -> None:
+def print_tab_gone(msg: TabGoneEvent) -> None:
     print(
-        f"\n[-] 标签消失  chromeTabId={msg.get('chromeTabId')}  "
-        f"source={msg.get('source')}  "
+        f"\n[-] 标签消失  chromeTabId={msg['chromeTabId']}  "
+        f"source={msg['source']}  "
         f"{msg.get('title', '')}  {msg.get('url', '')}"
     )
 

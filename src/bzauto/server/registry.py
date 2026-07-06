@@ -7,13 +7,21 @@ from typing import Any
 
 import socketio
 
+from bzauto.protocol.types import (
+    EventName,
+    QueryFilter,
+    RemoteCallError,
+    TabEvent,
+    TabInfo,
+)
+
 logger = logging.getLogger("boss.registry")
 
 
 class ElementNotFound(LookupError):
     """Raised when a bbox/query selector matches no elements."""
 
-    def __init__(self, selector: str, filter: dict | None = None) -> None:
+    def __init__(self, selector: str, filter: QueryFilter | None = None) -> None:
         self.selector = selector
         self.filter = filter
         ctx = f"selector={selector!r}"
@@ -33,8 +41,8 @@ class TabRegistry:
             ping_timeout=25,
         )
         self._sid: str | None = None
-        self._tabs: dict[int, dict[str, Any]] = {}
-        self._event_handlers: dict[str, list[Callable]] = {}
+        self._tabs: dict[int, TabInfo] = {}
+        self._event_handlers: dict[str, list[Callable[[TabEvent], Any]]] = {}
         self._exec_store: dict[str, str] = {}
         self._register_sio_events()
 
@@ -50,31 +58,31 @@ class TabRegistry:
             if self._sid == sid:
                 self._sid = None
 
-        @self.sio.on("sync_state")
-        async def on_sync_state(sid, data):
-            self.handle_tab_event({"type": "sync_state", **data})
+        @self.sio.on(EventName.SYNC_STATE)
+        async def on_sync_state(sid: str, data: dict[str, Any]) -> None:
+            self.handle_tab_event({"type": EventName.SYNC_STATE, **data})
 
-        @self.sio.on("tab_created")
-        async def on_tab_created(sid, data):
-            self.handle_tab_event({"type": "tab_created", **data})
+        @self.sio.on(EventName.TAB_CREATED)
+        async def on_tab_created(sid: str, data: dict[str, Any]) -> None:
+            self.handle_tab_event({"type": EventName.TAB_CREATED, **data})
 
-        @self.sio.on("tab_updated")
-        async def on_tab_updated(sid, data):
-            self.handle_tab_event({"type": "tab_updated", **data})
+        @self.sio.on(EventName.TAB_UPDATED)
+        async def on_tab_updated(sid: str, data: dict[str, Any]) -> None:
+            self.handle_tab_event({"type": EventName.TAB_UPDATED, **data})
 
-        @self.sio.on("tab_closed")
-        async def on_tab_closed(sid, data):
-            self.handle_tab_event({"type": "tab_closed", **data})
+        @self.sio.on(EventName.TAB_CLOSED)
+        async def on_tab_closed(sid: str, data: dict[str, Any]) -> None:
+            self.handle_tab_event({"type": EventName.TAB_CLOSED, **data})
 
-        @self.sio.on("tab_activated")
-        async def on_tab_activated(sid, data):
-            self.handle_tab_event({"type": "tab_activated", **data})
+        @self.sio.on(EventName.TAB_ACTIVATED)
+        async def on_tab_activated(sid: str, data: dict[str, Any]) -> None:
+            self.handle_tab_event({"type": EventName.TAB_ACTIVATED, **data})
 
-    def on(self, event: str, callback: Callable) -> None:
+    def on(self, event: str, callback: Callable[[TabEvent], Any]) -> None:
         logger.debug("注册事件监听: event=%s", event)
         self._event_handlers.setdefault(event, []).append(callback)
 
-    def off(self, event: str, callback: Callable | None = None) -> None:
+    def off(self, event: str, callback: Callable[[TabEvent], Any] | None = None) -> None:
         if callback is None:
             logger.debug("移除所有事件监听: event=%s", event)
             self._event_handlers.pop(event, None)
@@ -85,14 +93,14 @@ class TabRegistry:
             except (KeyError, ValueError):
                 pass
 
-    def _broadcast(self, msg: dict) -> None:
+    def _broadcast(self, msg: Any) -> None:
         event_type = msg.get("type", "")
         handlers = self._event_handlers.get(event_type, [])
         if handlers:
             logger.debug("广播事件: type=%s handlers=%d", event_type, len(handlers))
         for cb in handlers:
             try:
-                result = cb(msg)
+                result = cb(msg)  # type: ignore[arg-type]
                 if asyncio.iscoroutine(result):
                     try:
                         loop = asyncio.get_running_loop()
@@ -111,22 +119,24 @@ class TabRegistry:
         if self._sid is None:
             raise ConnectionError("扩展后台未连接")
         try:
-            result = await self.sio.call(event, data, to=self._sid, timeout=timeout)
+            result = await self.sio.call(event, data, to=self._sid, timeout=int(timeout))
             if isinstance(result, dict) and "error" in result:
-                raise Exception(result["error"])
+                raise RemoteCallError(event, result["error"])
             result_str = str(result) if result else "None"
             logger.debug("<< 命令完成: event=%s result=%s", event, result_str[:200] if len(result_str) > 200 else result_str)
             return result
-        except socketio.exceptions.TimeoutError:
-            logger.debug("!! 命令超时: event=%s timeout=%s", event, timeout)
-            raise TimeoutError(f"{event} 超时 ({timeout}s)") from None
+        except Exception as e:
+            if "timeout" in str(type(e).__name__).lower() or "timeout" in str(e).lower():
+                logger.debug("!! 命令超时: event=%s timeout=%s", event, timeout)
+                raise TimeoutError(f"{event} 超时 ({timeout}s)") from None
+            raise
 
     def handle_tab_event(self, msg: dict) -> None:
         t = msg.get("type")
         logger.debug("处理标签事件: type=%s", t)
 
-        if t == "sync_state":
-            new_tabs: dict[int, dict] = {}
+        if t == EventName.SYNC_STATE:
+            new_tabs: dict[int, TabInfo] = {}
             for tb in msg.get("tabs", []):
                 ctid = tb.get("chromeTabId")
                 if ctid is not None:
@@ -138,12 +148,12 @@ class TabRegistry:
             for ctid in old_ids - new_ids:
                 tb = self._tabs[ctid]
                 logger.info("[-] 标签从同步消失: chromeTabId=%s", ctid)
-                self._broadcast({"type": "tab_gone", "chromeTabId": ctid, "source": "sync_removed", **tb})
+                self._broadcast({"type": EventName.TAB_GONE, "chromeTabId": ctid, "source": "sync_removed", **tb})
 
             for ctid in new_ids - old_ids:
                 tb = new_tabs[ctid]
                 logger.info("[+] 标签同步: chromeTabId=%s url=%s", ctid, tb.get("url", "")[:60])
-                self._broadcast({"type": "tab_ready", "chromeTabId": ctid, "source": "sync", **tb})
+                self._broadcast({"type": EventName.TAB_READY, "chromeTabId": ctid, "source": "sync", **tb})
 
             for ctid in old_ids & new_ids:
                 old = self._tabs[ctid]
@@ -154,27 +164,20 @@ class TabRegistry:
                         changes[key] = new[key]
                 if changes:
                     logger.debug("标签变更: chromeTabId=%s changes=%s", ctid, changes)
-                    self._broadcast({"type": "tab_changed", "chromeTabId": ctid, "changes": changes, **new})
+                    self._broadcast({"type": EventName.TAB_CHANGED, "chromeTabId": ctid, "changes": changes, **new})
 
             self._tabs = new_tabs
             logger.info("[同步] 全量标签状态: %d 个标签", len(self._tabs))
 
-        elif t == "tab_created":
+        elif t == EventName.TAB_CREATED:
             ctid = msg.get("chromeTabId")
             if ctid is not None:
-                tb = {
-                    "chromeTabId": ctid,
-                    "url": msg.get("url", ""),
-                    "title": msg.get("title", ""),
-                    "status": msg.get("status", "loading"),
-                    "active": msg.get("active", False),
-                    "windowId": msg.get("windowId"),
-                }
+                tb = self._build_tab_info(msg, ctid)
                 self._tabs[ctid] = tb
-                logger.info("[+] 标签创建: chromeTabId=%s url=%s", ctid, msg.get("url", "")[:60])
-                self._broadcast({"type": "tab_ready", "chromeTabId": ctid, "source": "created", **tb})
+                logger.info("[+] 标签创建: chromeTabId=%s url=%s", ctid, tb["url"][:60])
+                self._broadcast({"type": EventName.TAB_READY, "chromeTabId": ctid, "source": "created", **tb})
 
-        elif t == "tab_updated":
+        elif t == EventName.TAB_UPDATED:
             ctid = msg.get("chromeTabId")
             if ctid is not None:
                 if ctid in self._tabs:
@@ -183,31 +186,24 @@ class TabRegistry:
                     for key in ("url", "title", "status"):
                         if key in msg and msg[key] is not None and tb.get(key) != msg[key]:
                             changes[key] = msg[key]
-                            tb[key] = msg[key]
+                            tb[key] = msg[key]  # type: ignore[typeddict-unknown-key]
                     if changes:
                         logger.debug("标签更新: chromeTabId=%s changes=%s", ctid, changes)
-                        self._broadcast({"type": "tab_changed", "chromeTabId": ctid, "changes": changes, **tb})
+                        self._broadcast({"type": EventName.TAB_CHANGED, "chromeTabId": ctid, "changes": changes, **tb})
                 else:
-                    tb = {
-                        "chromeTabId": ctid,
-                        "url": msg.get("url", ""),
-                        "title": msg.get("title", ""),
-                        "status": msg.get("status", "loading"),
-                        "active": msg.get("active", False),
-                        "windowId": msg.get("windowId"),
-                    }
+                    tb = self._build_tab_info(msg, ctid)
                     self._tabs[ctid] = tb
-                    logger.info("[+] 标签更新(竞态): chromeTabId=%s url=%s", ctid, tb.get("url", "")[:60])
-                    self._broadcast({"type": "tab_ready", "chromeTabId": ctid, "source": "updated", **tb})
+                    logger.info("[+] 标签更新(竞态): chromeTabId=%s url=%s", ctid, tb["url"][:60])
+                    self._broadcast({"type": EventName.TAB_READY, "chromeTabId": ctid, "source": "updated", **tb})
 
-        elif t == "tab_closed":
+        elif t == EventName.TAB_CLOSED:
             ctid = msg.get("chromeTabId")
             if ctid is not None and ctid in self._tabs:
                 tb = self._tabs.pop(ctid)
                 logger.info("[-] 标签关闭: chromeTabId=%s", ctid)
-                self._broadcast({"type": "tab_gone", "chromeTabId": ctid, "source": "closed", **tb})
+                self._broadcast({"type": EventName.TAB_GONE, "chromeTabId": ctid, "source": "closed", **tb})
 
-        elif t == "tab_activated":
+        elif t == EventName.TAB_ACTIVATED:
             ctid = msg.get("chromeTabId")
             if ctid is not None:
                 logger.debug("标签激活: chromeTabId=%s", ctid)
@@ -215,13 +211,23 @@ class TabRegistry:
                     new_active = (tid == ctid)
                     if self._tabs[tid]["active"] != new_active:
                         self._tabs[tid]["active"] = new_active
-                        self._broadcast({"type": "tab_changed", "chromeTabId": tid, "changes": {"active": new_active}, **self._tabs[tid]})
+                        self._broadcast({"type": EventName.TAB_CHANGED, "chromeTabId": tid, "changes": {"active": new_active}, **self._tabs[tid]})
+
+    def _build_tab_info(self, msg: dict[str, Any], chrome_tab_id: int) -> TabInfo:
+        return TabInfo(
+            chromeTabId=chrome_tab_id,
+            url=msg.get("url", ""),
+            title=msg.get("title", ""),
+            status=msg.get("status", "loading"),
+            active=msg.get("active", False),
+            windowId=msg.get("windowId"),
+        )
 
     @property
-    def tabs(self) -> list[dict[str, Any]]:
+    def tabs(self) -> list[TabInfo]:
         return list(self._tabs.values())
 
-    def get_tab(self, chrome_tab_id: int) -> dict[str, Any] | None:
+    def get_tab(self, chrome_tab_id: int) -> TabInfo | None:
         return self._tabs.get(chrome_tab_id)
 
     async def close_all(self) -> None:

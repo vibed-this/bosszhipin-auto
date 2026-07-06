@@ -4,8 +4,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 
+from bzauto.models import ChatItem
 from bzauto.pages.base import BasePage
 from bzauto.server.tab_session import TabSession
 
@@ -58,7 +59,7 @@ class BossChatListPage(BasePage):
         limit: int = 50,
         *,
         include_status: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ChatItem]:
         project = _CHAT_PROJECT_WITH_STATUS if include_status else _CHAT_PROJECT
         raw = await self._session.query(
             select=_LIST_ITEM,
@@ -67,12 +68,9 @@ class BossChatListPage(BasePage):
         )
         if not raw:
             return []
-        if include_status:
-            for item in raw:
-                item["status"] = (item.get("status") or "").strip(" []")
-        return raw[:limit]
+        return [ChatItem.from_query_row(item) for item in raw[:limit]]
 
-    async def get_chat_item_at(self, index: int) -> dict[str, Any] | None:
+    async def get_chat_item_at(self, index: int) -> ChatItem | None:
         raw = await self._session.query(
             select=_LIST_ITEM,
             filter={"index": index},
@@ -81,13 +79,11 @@ class BossChatListPage(BasePage):
         )
         if not raw:
             return None
-        item = raw[0]
-        item["status"] = (item.get("status") or "").strip(" []")
-        return item
+        return ChatItem.from_query_row(raw[0])
 
     async def iter_chat_items(
         self, *, max_scrolls: int = 0
-    ) -> AsyncIterator[tuple[dict[str, Any], int]]:
+    ) -> AsyncIterator[tuple[ChatItem, int]]:
         index = 0
         scroll_count = 0
 
@@ -131,45 +127,39 @@ class BossChatListPage(BasePage):
             return raw[0].get("text", "")
         return None
 
-    async def click_chat_item(self, index: int = 0) -> bool:
-        return await self._session.click_element(
+    async def click_chat_item(self, index: int = 0) -> None:
+        await self._session.click_element(
             _LIST_ITEM,
             filter={"index": index},
             wait_visible=_TOP_INFO,
             post_sleep=0.5,
         )
 
-    async def click_more_button(self) -> bool:
-        return await self._session.click_element(
+    async def click_more_button(self) -> None:
+        await self._session.click_element(
             _MORE_LABEL,
             wait_visible=_DROPDOWN_LIST,
             post_sleep=0.5,
         )
 
-    async def click_delete_in_menu(self) -> bool:
-        return await self._session.click_element(
+    async def click_delete_in_menu(self) -> None:
+        await self._session.click_element(
             _DROPDOWN_ITEM_SPAN,
             filter={"textContains": "删除"},
             wait_visible=_DIALOG_WRAPPER,
             post_sleep=0.5,
         )
 
-    async def click_cancel_in_dialog(self) -> bool:
-        result = await self._session.click_element(
+    async def click_cancel_in_dialog(self) -> None:
+        await self._session.click_element(
             _DIALOG_CANCEL,
             wait_hidden=_DIALOG_WRAPPER,
             post_sleep=0.5,
         )
-        if not result:
-            log.warning("弹窗未关闭")
-        return result
 
-    async def click_confirm_in_dialog(self) -> bool:
-        result = await self._session.click_element(
+    async def click_confirm_in_dialog(self) -> None:
+        await self._session.click_element(
             _DIALOG_CONFIRM,
             wait_hidden=_DIALOG_WRAPPER,
             post_sleep=0.5,
         )
-        if not result:
-            log.warning("弹窗未关闭")
-        return result

@@ -1,3 +1,34 @@
+// Command names
+export const COMMAND_NAMES = {
+  OPEN_TAB: 'open_tab',
+  CLOSE_TAB: 'close_tab',
+  ACTIVATE_TAB: 'activate_tab',
+  RELOAD_TAB: 'reload_tab',
+  LIST_TABS: 'list_tabs',
+  EXECUTE: 'execute',
+  QUERY: 'query',
+  DUMP_HTML: 'dump_html',
+} as const;
+
+export type CommandName = (typeof COMMAND_NAMES)[keyof typeof COMMAND_NAMES];
+
+// Event names
+export const EVENT_NAMES = {
+  SYNC_STATE: 'sync_state',
+  TAB_CREATED: 'tab_created',
+  TAB_UPDATED: 'tab_updated',
+  TAB_CLOSED: 'tab_closed',
+  TAB_ACTIVATED: 'tab_activated',
+  TAB_READY: 'tab_ready',
+  TAB_GONE: 'tab_gone',
+  TAB_CHANGED: 'tab_changed',
+} as const;
+
+export type EventName = (typeof EVENT_NAMES)[keyof typeof EVENT_NAMES];
+
+// Ack callback type
+export type Ack = (result: any) => void;
+
 // Tab info
 export interface TabInfo {
   chromeTabId: number;
@@ -45,14 +76,22 @@ export interface BboxResult {
 }
 
 // Query result
+export interface QueryMeta {
+  url: string;
+  matched: number;
+  tookMs: number;
+}
+
 export interface QueryResult {
   data: any;
-  _meta?: {
-    url: string;
-    matched: number;
-    tookMs: number;
-  };
+  _meta?: QueryMeta;
   __error__?: string;
+}
+
+// Raw element (return_="raw")
+export interface RawElement {
+  text: string;
+  html: string;
 }
 
 // RPC command args/results

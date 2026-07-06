@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any
 
 from bzauto.flows.base import BaseFlow
+from bzauto.models import ChatItem
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.server.tab_session import TabSession
 
@@ -27,14 +28,14 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         *,
         max_scrolls: int = 0,
         output: str | Path | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ChatItem]:
         await self._setup(url or _CHAT_URL, reuse_existing=True)
 
-        all_items: list[dict[str, Any]] = []
+        all_items: list[ChatItem] = []
         seen: set[tuple[str, str]] = set()
 
         async for item, _idx in self._page.iter_chat_items(max_scrolls=max_scrolls):
-            key = (item.get("name", ""), item.get("company", ""))
+            key = (item.name, item.company)
             if key not in seen:
                 seen.add(key)
                 all_items.append(item)
@@ -44,7 +45,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         if output:
             path = Path(output)
             path.write_text(
-                json.dumps(all_items, ensure_ascii=False, indent=2),
+                json.dumps([asdict(i) for i in all_items], ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
             log.info("数据已保存到 %s", path)

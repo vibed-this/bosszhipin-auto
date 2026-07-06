@@ -22,7 +22,10 @@ boss-server = "bzauto.__main__:cli_main"
 boss-analyze = "bzauto.analyze:cli_main"
 boss-scrape = "bzauto.scrape_jobs:cli_main"
 boss-scrape-chat = "bzauto.scrape_chat_auto:cli_main"
-boss-ui = "bzauto.ui:run_ui"
+
+[tool.mypy]
+strict = true
+warn_return_any = true
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -6,6 +6,7 @@ import logging
 import re
 from typing import Any, AsyncIterator
 
+from bzauto.models import JobCard
 from bzauto.pages.base import BasePage
 from bzauto.server.tab_session import TabSession
 
@@ -68,27 +69,31 @@ class BossJobListPage(BasePage):
     def __init__(self, session: TabSession) -> None:
         super().__init__(session)
 
-    async def get_job_cards(self) -> list[dict[str, Any]]:
+    async def get_job_cards(self) -> list[JobCard]:
         cards = await self._session.query(
             select=_JOB_ITEM,
             project=_JOB_PROJECT,
             return_="list",
         )
+        result: list[JobCard] = []
         for card in cards:
             if "salary" in card:
                 card["salary"] = _decode_salary_icon(card["salary"])
-        return cards
+            result.append(JobCard.from_query_row(card))
+        return result
 
-    async def get_job_card_at(self, index: int) -> dict[str, Any] | None:
+    async def get_job_card_at(self, index: int) -> JobCard | None:
         raw = await self._session.query(
             select=_JOB_ITEM,
             filter={"index": index},
             project=_JOB_PROJECT,
             return_="list",
         )
-        if raw and "salary" in raw[0]:
+        if not raw:
+            return None
+        if "salary" in raw[0]:
             raw[0]["salary"] = _decode_salary_icon(raw[0]["salary"])
-        return raw[0] if raw else None
+        return JobCard.from_query_row(raw[0])
 
     async def click_card_at(self, index: int) -> bool:
         """点击指定索引的职位卡片。"""
@@ -102,23 +107,25 @@ class BossJobListPage(BasePage):
         await asyncio.sleep(0.5)
         return True
 
-    async def click_chat(self, index: int = 0) -> bool:
+    async def click_chat(self, index: int = 0) -> None:
         """点击沟通按钮。"""
-        return await self._session.click_element(
+        await self._session.click_element(
             "a.op-btn-chat",
             filter={"nth": index},
             post_sleep=1.5,
         )
 
-    async def click_expect_tab(self) -> bool:
+    async def click_expect_tab(self) -> None:
         """点击期望 tab。"""
-        return await self._session.click_element(
+        await self._session.click_element(
             _EXPECT_TAB,
             post_sleep=1.5,
         )
 
     async def dismiss_dialogs(self) -> bool:
         """关闭弹窗。返回 True 继续，False 终止。无弹窗返回 True。"""
+        from bzauto.server.registry import ElementNotFound
+
         for selector in _DIALOG_SELECTORS:
             try:
                 bbox = await self._session.bbox(selector)
@@ -133,8 +140,8 @@ class BossJobListPage(BasePage):
                         bbox["physical"]["cx"], bbox["physical"]["cy"]
                     )
                     await asyncio.sleep(0.5)
-            except Exception:
-                pass
+            except (ElementNotFound, TimeoutError, ConnectionError) as e:
+                log.debug("关闭弹窗失败 %s: %s", selector, e)
 
         raw = await self._session.query(
             select=".chat-block-dialog .chat-block-body",
@@ -174,7 +181,7 @@ class BossJobListPage(BasePage):
         *,
         max_scrolls: int = 10,
         scroll_timeout: float = 5.0,
-    ) -> AsyncIterator[tuple[dict[str, Any], int]]:
+    ) -> AsyncIterator[tuple[JobCard, int]]:
         """异步迭代器：逐个产出职位卡片，自动处理翻页和智能滚动。"""
         index = 0
         scroll_count = 0
@@ -233,20 +240,20 @@ class BossJobListPage(BasePage):
         max_salary: int | None = None,
         max_scrolls: int = 10,
         scroll_timeout: float = 5.0,
-    ) -> AsyncIterator[tuple[dict[str, Any], int]]:
+    ) -> AsyncIterator[tuple[JobCard, int]]:
         """包装 iter_job_cards，按白名单/黑名单/薪资过滤并去重。"""
         seen: set[tuple[str, str]] = set()
         async for card, idx in self.iter_job_cards(
             max_scrolls=max_scrolls,
             scroll_timeout=scroll_timeout,
         ):
-            title = (card.get("title") or "").strip().lower()
+            title = card.title.strip().lower()
             if whitelist and not any(kw in title for kw in whitelist):
                 continue
             if blacklist and any(kw in title for kw in blacklist):
                 continue
 
-            salary = _parse_salary(card.get("salary") or "")
+            salary = _parse_salary(card.salary)
             if min_salary is not None:
                 if salary is None or salary[0] < min_salary:
                     continue
@@ -254,7 +261,7 @@ class BossJobListPage(BasePage):
                 if salary is None or salary[1] < max_salary:
                     continue
 
-            key = (card.get("title") or "", card.get("company") or "")
+            key = (card.title, card.company)
             if key in seen:
                 continue
             seen.add(key)

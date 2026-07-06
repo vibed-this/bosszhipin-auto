@@ -4,9 +4,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import Any
 
 from bzauto.flows.base import BaseFlow
+from bzauto.models import JobCard
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.server.tab_session import TabSession
 
@@ -49,18 +49,19 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
         min_salary: int | None = None,
         max_salary: int | None = None,
         reuse_existing: bool = False,
-    ) -> list[dict[str, Any]]:
+    ) -> list[JobCard]:
         await self._setup(url, reuse_existing=reuse_existing)
 
         log.info("切换到期望职位tab...")
-        ok = await self._page.click_expect_tab()
-        if not ok:
+        try:
+            await self._page.click_expect_tab()
+        except Exception:
             log.warning("未找到期望tab，使用默认列表")
 
-        all_jobs: list[dict[str, Any]] = []
+        all_jobs: list[JobCard] = []
 
         async for card, idx in self._iter_cards(max_scrolls=max_scrolls, min_salary=min_salary, max_salary=max_salary):
-            log.info("  [#%d] %s — %s", idx, card.get("title"), card.get("salary"))
+            log.info("  [#%d] %s — %s", idx, card.title, card.salary)
             all_jobs.append(card)
 
             await self._page.click_card_at(idx)

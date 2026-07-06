@@ -1,6 +1,37 @@
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
+
+
+class CommandName(StrEnum):
+    OPEN_TAB = "open_tab"
+    CLOSE_TAB = "close_tab"
+    ACTIVATE_TAB = "activate_tab"
+    RELOAD_TAB = "reload_tab"
+    LIST_TABS = "list_tabs"
+    EXECUTE = "execute"
+    QUERY = "query"
+    DUMP_HTML = "dump_html"
+
+
+class EventName(StrEnum):
+    SYNC_STATE = "sync_state"
+    TAB_CREATED = "tab_created"
+    TAB_UPDATED = "tab_updated"
+    TAB_CLOSED = "tab_closed"
+    TAB_ACTIVATED = "tab_activated"
+    TAB_READY = "tab_ready"
+    TAB_GONE = "tab_gone"
+    TAB_CHANGED = "tab_changed"
+
+
+class RemoteCallError(Exception):
+    """Raised when a remote Socket.IO call returns an error response."""
+
+    def __init__(self, event: str, message: str) -> None:
+        self.event = event
+        super().__init__(f"{event}: {message}")
 
 
 class TabInfo(TypedDict):
@@ -9,7 +40,7 @@ class TabInfo(TypedDict):
     title: str
     status: Optional[str]
     active: bool
-    windowId: int
+    windowId: Optional[int]
 
 
 class QueryFilter(TypedDict, total=False):
@@ -44,9 +75,15 @@ class BboxResult(TypedDict):
     physical: BboxCoords
 
 
+class QueryMeta(TypedDict):
+    url: str
+    matched: int
+    tookMs: int
+
+
 class QueryResult(TypedDict):
     data: Any
-    _meta: Optional[Dict[str, Any]]
+    _meta: Optional[QueryMeta]
     __error__: Optional[str]
 
 
@@ -122,7 +159,7 @@ class TabCreatedPayload(TypedDict):
     title: str
     status: Optional[str]
     active: bool
-    windowId: int
+    windowId: Optional[int]
 
 
 class TabUpdatedPayload(TypedDict):
@@ -143,3 +180,44 @@ class TabActivatedPayload(TypedDict):
 
 class SyncStatePayload(TypedDict):
     tabs: List[TabInfo]
+
+
+class RawElement(TypedDict):
+    text: str
+    html: str
+
+
+class TabReadyEvent(TypedDict):
+    type: Literal["tab_ready"]
+    chromeTabId: int
+    source: str
+    url: str
+    title: str
+    status: Optional[str]
+    active: bool
+    windowId: Optional[int]
+
+
+class TabGoneEvent(TypedDict):
+    type: Literal["tab_gone"]
+    chromeTabId: int
+    source: str
+    url: str
+    title: str
+    status: Optional[str]
+    active: bool
+    windowId: Optional[int]
+
+
+class TabChangedEvent(TypedDict):
+    type: Literal["tab_changed"]
+    chromeTabId: int
+    changes: Dict[str, Any]
+    url: str
+    title: str
+    status: Optional[str]
+    active: bool
+    windowId: Optional[int]
+
+
+TabEvent = Union[TabReadyEvent, TabGoneEvent, TabChangedEvent]

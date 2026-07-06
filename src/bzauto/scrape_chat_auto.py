@@ -19,10 +19,10 @@ import asyncio
 import logging
 import os
 import sys
-from typing import Any
 
 import keyboard
 
+from bzauto.models import ChatItem
 from bzauto.server.tab_session import TabSession
 from bzauto.server.lifecycle import start_server, stop_server
 from bzauto.pages.chat_list import BossChatListPage
@@ -53,7 +53,7 @@ class BossChatAuto:
         *,
         max_scrolls: int = 0,
         output: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ChatItem]:
         return await self.flow.run(url, max_scrolls=max_scrolls, output=output)
 
     async def __aenter__(self) -> BossChatAuto:
