@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMainWindow, QPushButton, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMainWindow, QMenu, QPushButton, QTabWidget, QVBoxLayout, QWidget
 
 from bzauto.browser.js_helper import JS_HELPER
 from bzauto.browser.overlay import DotOverlay
@@ -57,7 +57,8 @@ class _AccountTab:
                  url_input: QLineEdit | None = None,
                  back_btn: QPushButton | None = None,
                  forward_btn: QPushButton | None = None,
-                 refresh_btn: QPushButton | None = None) -> None:
+                 refresh_btn: QPushButton | None = None,
+                 nav_btn: QPushButton | None = None) -> None:
         self.account_id = account_id
         self.name = name
         self.profile = profile
@@ -68,6 +69,7 @@ class _AccountTab:
         self.back_btn = back_btn
         self.forward_btn = forward_btn
         self.refresh_btn = refresh_btn
+        self.nav_btn = nav_btn
 
 
 class BrowserManager(QMainWindow):
@@ -144,6 +146,14 @@ class BrowserManager(QMainWindow):
         refresh_btn = QPushButton("↻")
         refresh_btn.setFixedWidth(32)
 
+        nav_btn = QPushButton("快速跳转")
+        nav_btn.setFixedWidth(80)
+        nav_menu = QMenu(nav_btn)
+        nav_menu.addAction("首页", lambda: page.load(QUrl("https://www.zhipin.com/")))
+        nav_menu.addAction("职位", lambda: page.load(QUrl("https://www.zhipin.com/web/geek/jobs?ka=header-jobs")))
+        nav_menu.addAction("消息", lambda: page.load(QUrl("https://www.zhipin.com/web/geek/chat")))
+        nav_btn.setMenu(nav_menu)
+
         url_input = QLineEdit()
         url_input.setPlaceholderText("输入网址...")
 
@@ -168,6 +178,7 @@ class BrowserManager(QMainWindow):
         nav_layout.addWidget(back_btn)
         nav_layout.addWidget(forward_btn)
         nav_layout.addWidget(refresh_btn)
+        nav_layout.addWidget(nav_btn)
         nav_layout.addWidget(url_input, 1)
 
         nav_widget = QWidget()
@@ -188,6 +199,7 @@ class BrowserManager(QMainWindow):
             back_btn=back_btn,
             forward_btn=forward_btn,
             refresh_btn=refresh_btn,
+            nav_btn=nav_btn,
         )
 
     def _on_tab_changed(self, index: int) -> None:
