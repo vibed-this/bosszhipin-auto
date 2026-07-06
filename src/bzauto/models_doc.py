@@ -98,6 +98,7 @@ class AccountDoc(BaseModel):
     :ivar daily_limit: 每日投递上限
     :ivar last_reset_date: 最后重置日期 (YYYY-MM-DD)
     :ivar enabled: 是否启用
+    :ivar role: 角色（scraper / dispatcher）
     """
 
     model_config = ConfigDict(use_enum_values=True)
@@ -108,3 +109,4 @@ class AccountDoc(BaseModel):
     daily_limit: int = 150
     last_reset_date: str = ""
     enabled: bool = True
+    role: str = "dispatcher"

@@ -89,6 +89,27 @@ class Storage:
         results = self._jobs.search(self._JobQ.dispatch_status == DispatchStatus.PENDING)
         return [JobDoc(**r) for r in results[:limit]]  # type: ignore[arg-type]
 
+    def count_jobs_today(self) -> int:
+        """统计今日更新的职位总数（近似今日采集/更新量）。
+
+        :returns: 当日更新职位数
+        """
+        today = _today_str()
+        return len(self._jobs.search(
+            self._JobQ.last_updated.test(lambda v: v.startswith(today) if v else False),
+        ))
+
+    def count_dispatched_today(self) -> int:
+        """统计今日成功投递的职位数。
+
+        :returns: 当日成功投递数
+        """
+        today = _today_str()
+        return len(self._jobs.search(
+            (self._JobQ.dispatch_status == DispatchStatus.SUCCESS) &
+            (self._JobQ.applied_at.test(lambda v: v.startswith(today) if v else False)),
+        ))
+
     def count_pending_jobs(self) -> int:
         """统计待派发职位数量。"""
         return len(self._jobs.search(self._JobQ.dispatch_status == DispatchStatus.PENDING))
@@ -155,6 +176,24 @@ class Storage:
             self._JobQ.job_id == job_id,
         )
         log.debug("job 失败: %s", job_id)
+
+    def count_stale_claims(self, timeout_minutes: int = 30) -> int:
+        """统计超时未完成的 claim 数量（不释放）。
+
+        :param timeout_minutes: 超时分钟数
+        :returns: 超时 claim 数量
+        """
+        now = datetime.datetime.now()
+        count = 0
+        for doc in self._jobs.search(self._JobQ.dispatch_status == DispatchStatus.CLAIMED):
+            dispatched_str = doc.get("dispatched_at", "")
+            try:
+                dispatched = datetime.datetime.fromisoformat(dispatched_str)
+            except (ValueError, TypeError):
+                continue
+            if (now - dispatched).total_seconds() > timeout_minutes * 60:
+                count += 1
+        return count
 
     def release_stale_claims(self, timeout_minutes: int = 30) -> int:
         """释放超时未完成的 claim。
@@ -397,6 +436,7 @@ class Storage:
                 daily_limit=acc_cfg.daily_limit,
                 last_reset_date=_today_str(),
                 enabled=True,
+                role=acc_cfg.role,
             )
             result.append(doc)
         return result

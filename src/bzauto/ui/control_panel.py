@@ -81,6 +81,12 @@ class ControlPanel(QWidget):
         self.btn_account.setFixedHeight(28)
         layout.addWidget(self.btn_account)
 
+        # Button: 调度
+        layout.addSpacing(2)
+        self.btn_schedule = QPushButton("调度")
+        self.btn_schedule.setFixedHeight(28)
+        layout.addWidget(self.btn_schedule)
+
         # Button: DEBUG
         layout.addSpacing(2)
         self.btn_debug = QPushButton("DEBUG")

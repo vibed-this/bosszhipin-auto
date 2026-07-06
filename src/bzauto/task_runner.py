@@ -59,6 +59,14 @@ class TaskRunner:
     def is_busy(self) -> bool:
         return self._current is not None
 
+    @property
+    def current_task_name(self) -> str | None:
+        return self._current.name if self._current else None
+
+    @property
+    def pending_count(self) -> int:
+        return self._queue.qsize()
+
 
 class _FutureTask(ScheduledTask):
     def __init__(self, inner: ScheduledTask, future: asyncio.Future[dict[str, Any]]) -> None:

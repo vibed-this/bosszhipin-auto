@@ -34,6 +34,7 @@ from bzauto.ui.control_panel import ControlPanel
 from bzauto.ui.log_window import LogWindow
 from bzauto.ui.config_dialog import ConfigDialog
 from bzauto.ui.data_window import DataWindow
+from bzauto.ui.schedule_window import ScheduleWindow
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -80,6 +81,7 @@ class BzAutoApp:
         self._control = ControlPanel()
         self._log_win = LogWindow()
         self._data_win: DataWindow | None = None
+        self._schedule_win: ScheduleWindow | None = None
         self._account_win: AccountWindow | None = None
         self._debug_win: DebugWindow | None = None
 
@@ -134,6 +136,7 @@ class BzAutoApp:
         self._control.btn_config.clicked.connect(self._on_open_config)
         self._control.btn_data.clicked.connect(self._on_open_data)
         self._control.btn_account.clicked.connect(self._on_open_account)
+        self._control.btn_schedule.clicked.connect(self._on_open_schedule)
         self._control.btn_debug.clicked.connect(self._on_open_debug)
 
     async def _async_stop(self) -> None:
@@ -169,6 +172,14 @@ class BzAutoApp:
         self._account_win.show()
         self._account_win.raise_()
         self._account_win.refresh()
+
+    # ── 调度面板管理 ──
+
+    def _on_open_schedule(self) -> None:
+        if self._schedule_win is None:
+            self._schedule_win = ScheduleWindow(self)
+        self._schedule_win.show()
+        self._schedule_win.raise_()
 
     # ── Debug 窗口管理 ──
 

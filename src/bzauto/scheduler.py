@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
+import re
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -173,6 +174,42 @@ class BzScheduler:
     def stop(self) -> None:
         self._scheduler.shutdown(wait=False)
         log.info("调度器已停止")
+
+    _JOB_LABEL_MAP: dict[str, str] = {
+        "_trigger_scrape": "采集",
+        "_trigger_dispatch": "投递",
+        "_trigger_scan": "扫描",
+    }
+
+    @property
+    def running(self) -> bool:
+        return self._scheduler.running
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        """返回各注册 job 的结构化快照。
+
+        :returns: [{id, label, trigger_kind, trigger_repr, next_run_time}, ...]
+        """
+        if not self._scheduler.running:
+            return []
+        results: list[dict[str, Any]] = []
+        for job in self._scheduler.get_jobs():
+            func_ref = job.func_ref or ""
+            m = re.search(r'_trigger_(\w+)', func_ref)
+            key = m.group(0) if m else ""
+            label = self._JOB_LABEL_MAP.get(key, job.id)
+
+            trigger_repr = str(job.trigger)
+            trigger_kind = str(type(job.trigger).__name__).removesuffix("Trigger").lower()
+
+            results.append({
+                "id": job.id,
+                "label": label,
+                "trigger_kind": trigger_kind,
+                "trigger_repr": trigger_repr,
+                "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
+            })
+        return results
 
     async def _trigger_scrape(self) -> None:
         cfg = get_config()
