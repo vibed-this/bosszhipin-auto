@@ -201,7 +201,9 @@ class DataWindow(QWidget):
             table.setItem(i, 1, QTableWidgetItem(c.get("company", "")))
             table.setItem(i, 2, QTableWidgetItem(c.get("position", "")))
             table.setItem(i, 3, QTableWidgetItem(c.get("last_msg", "")))
-            table.setItem(i, 4, QTableWidgetItem(c.get("sender", "")))
+            sender_raw = c.get("sender", "")
+            sender_display = {"self": "自己", "other": "对方"}.get(sender_raw, sender_raw)
+            table.setItem(i, 4, QTableWidgetItem(sender_display))
             uc = c.get("unread_count")
             if uc == -1:
                 display_uc = "?"
