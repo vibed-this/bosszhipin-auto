@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers import SchedulerNotRunningError
 
 from bzauto.config import get_config
 from bzauto.browser import get_browser_manager
@@ -172,8 +173,11 @@ class BzScheduler:
         log.info("调度器已启动")
 
     def stop(self) -> None:
-        self._scheduler.shutdown(wait=False)
-        log.info("调度器已停止")
+        try:
+            self._scheduler.shutdown(wait=False)
+            log.info("调度器已停止")
+        except SchedulerNotRunningError:
+            log.info("调度器已处于停止状态")
 
     _JOB_LABEL_MAP: dict[str, str] = {
         "_trigger_scrape": "采集",

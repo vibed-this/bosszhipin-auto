@@ -213,6 +213,8 @@ class BzAutoApp:
         log.info("停止信号触发")
         if self._scheduler:
             self._scheduler.stop()
+        if self._task_runner is not None:
+            self._task_runner.cancel_current()
         if self._current_task is not None and not self._current_task.done():
             self._current_task.cancel()
             log.info("当前任务已取消")

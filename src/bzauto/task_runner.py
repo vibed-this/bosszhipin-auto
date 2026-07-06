@@ -23,6 +23,7 @@ class TaskRunner:
         self._loop = loop
         self._queue: asyncio.Queue[ScheduledTask] = asyncio.Queue()
         self._current: ScheduledTask | None = None
+        self._current_exec: asyncio.Task | None = None
         self._loop.create_task(self._worker())
 
     async def submit(self, task: ScheduledTask) -> None:
@@ -34,6 +35,10 @@ class TaskRunner:
         await self._queue.put(wrapped)
         return await future
 
+    def cancel_current(self) -> None:
+        if self._current_exec is not None and not self._current_exec.done():
+            self._current_exec.cancel()
+
     async def _worker(self) -> None:
         while True:
             try:
@@ -42,18 +47,23 @@ class TaskRunner:
                 break
             self._current = task
             try:
-                result = await task.execute()
+                self._current_exec = asyncio.create_task(task.execute())
+                result = await self._current_exec
                 if isinstance(task, _FutureTask):
                     task.future.set_result(result)
             except asyncio.CancelledError:
                 if isinstance(task, _FutureTask):
-                    task.future.set_exception(asyncio.CancelledError())
-                break
+                    try:
+                        task.future.set_exception(asyncio.CancelledError())
+                    except asyncio.InvalidStateError:
+                        pass
             except Exception as e:
                 log.error("任务异常 (%s): %s", task.name, e)
                 if isinstance(task, _FutureTask):
                     task.future.set_exception(e)
-            self._current = None
+            finally:
+                self._current = None
+                self._current_exec = None
 
     @property
     def is_busy(self) -> bool:
