@@ -22,6 +22,7 @@ _JOB_FIELDS = [
 _CONV_FIELDS = [
     "conv_id", "account", "name", "company", "position",
     "last_msg", "last_msg_time", "platform_status", "status",
+    "sender", "unread_count",
     "status_changed_at", "linked_job_id", "first_seen_at",
     "last_updated", "note",
 ]

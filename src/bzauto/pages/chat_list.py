@@ -38,6 +38,8 @@ _CHAT_PROJECT = {
     "position": f"{_NAME_BOX} span:nth-child(4)@text",
     "time": f"{_TIME}@text",
     "lastMsg": f"{_MSG}@text",
+    "firstChildClass": ".gray.last-msg > :first-child@class",
+    "unreadCount": ".notice-badge@text",
 }
 
 _CHAT_PROJECT_WITH_STATUS = {

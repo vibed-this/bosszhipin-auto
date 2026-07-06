@@ -7,10 +7,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from bzauto.config import get_config
 from bzauto.enums import ConvStatus
 from bzauto.flows.base import BaseFlow
-from bzauto.models import ChatItem
+from bzauto.models import ChatItem, classify_msg_type
 from bzauto.pages.chat_list import BossChatListPage, _CHAT_URL
 from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
@@ -18,16 +17,14 @@ from bzauto.storage import Storage
 log = logging.getLogger("flow.scrape_chat")
 
 
-def infer_status(last_msg: str, platform_status: str, old_status: str) -> str:
-    cfg = get_config()
-    keywords = cfg.delete.keywords
-    if any(kw in last_msg for kw in keywords):
-        return ConvStatus.REJECTION
-    invitation_keywords = ["面试", "邀约", "到面", "面试邀请"]
-    if any(kw in last_msg for kw in invitation_keywords):
-        return ConvStatus.INVITATION
-    if old_status not in (ConvStatus.REPLIED, ConvStatus.CLOSED, ConvStatus.DELETED, ConvStatus.REJECTION):
+def infer_status(sender: str, unread_count: int, old_status: str) -> str:
+    """仅判断交互状态，不涉及消息内容分类。"""
+    if sender == "self":
+        return old_status
+    if unread_count > 0:
         return ConvStatus.PENDING_REPLY
+    if old_status not in (ConvStatus.REPLIED, ConvStatus.CLOSED, ConvStatus.DELETED):
+        return ConvStatus.READ_NO_REPLY
     return old_status
 
 
@@ -86,12 +83,12 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
             else:
                 old_status = existing_map.get((conv_id, self._account_id), ConvStatus.NEW)
 
-            status = infer_status(item.lastMsg, item.status, old_status)
+            status = infer_status(item.sender, item.unread_count, old_status)
             storage.update_conv_status(conv_id, self._account_id, status)
 
-            if status == ConvStatus.REJECTION:
+            if classify_msg_type(item.lastMsg, item.sender) == "拒信":
                 rejections.append(f"{item.name}·{item.company}: {item.lastMsg}")
-            if item.status == "未读":
+            if item.sender == "other" and item.unread_count > 0:
                 unread.append(f"{item.name}·{item.company}")
 
         if output:

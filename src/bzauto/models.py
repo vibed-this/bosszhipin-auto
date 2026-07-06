@@ -5,6 +5,9 @@ import hashlib
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from bzauto.enums import MsgType
+
+
 
 @dataclass(frozen=True)
 class JobCard:
@@ -62,16 +65,31 @@ class ChatItem:
     time: str
     lastMsg: str
     status: str = ""
+    sender: str = ""        # "self" | "other"
+    unread_count: int = 0   # 0=已读, >0=对方未读条数, -1=未知
 
     @classmethod
     def from_query_row(cls, row: dict[str, Any]) -> ChatItem:
+        last_msg = row.get("lastMsg") or ""
+        first_child_class = row.get("firstChildClass") or ""
+        sender = "other" if first_child_class == "last-msg-text" else "self"
+        unread_text = row.get("unreadCount")
+        unread_count = int(unread_text) if unread_text and unread_text.strip().isdigit() else 0
+
+        # 文件消息覆写 sender / unread_count
+        if last_msg.lower().endswith(".pdf"):
+            sender = "self"
+            unread_count = -1
+
         return cls(
             name=row.get("name") or "",
             company=row.get("company") or "",
             position=row.get("position") or "",
             time=row.get("time") or "",
-            lastMsg=row.get("lastMsg") or "",
+            lastMsg=last_msg,
             status=(row.get("status") or "").strip(" []"),
+            sender=sender,
+            unread_count=unread_count,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -89,4 +107,22 @@ class ChatItem:
             "last_msg": self.lastMsg,
             "last_msg_time": self.time,
             "platform_status": self.status,
+            "sender": self.sender,
+            "unread_count": self.unread_count,
         }
+
+
+def classify_msg_type(last_msg: str, sender: str) -> str:
+    """根据消息内容和发送方判断内容分类。"""
+    if sender == "self":
+        if last_msg.lower().endswith(".pdf"):
+            return MsgType.FILE
+        return MsgType.NORMAL
+    from bzauto.config import get_config
+    cfg = get_config()
+    if any(kw in last_msg for kw in cfg.delete.keywords):
+        return MsgType.REJECTION
+    invitation_keywords = ["面试", "邀约", "到面", "面试邀请"]
+    if any(kw in last_msg for kw in invitation_keywords):
+        return MsgType.INVITATION
+    return MsgType.NORMAL

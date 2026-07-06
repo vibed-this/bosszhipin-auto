@@ -5,7 +5,7 @@ import csv
 import os
 from typing import Any
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QComboBox,
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from bzauto.config import get_config
+from bzauto.models import classify_msg_type
 from bzauto.storage import Storage
 
 
@@ -76,11 +77,17 @@ class DataWindow(QWidget):
 
         self._jobs_table = QTableWidget(0, 7)
         self._jobs_table.setHorizontalHeaderLabels(["职位名", "公司", "薪资", "状态", "账号", "投递时间", "备注"])
-        self._jobs_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header = self._jobs_table.horizontalHeader()
+        widths = [180, 160, 80, 80, 80, 160, 120]
+        for i, w in enumerate(widths):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+            self._jobs_table.setColumnWidth(i, w)
+        header.setStretchLastSection(True)
         self._jobs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._jobs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._jobs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._jobs_table.customContextMenuRequested.connect(self._jobs_context_menu)
-        self._jobs_table.cellDoubleClicked.connect(self._jobs_cell_double_clicked)
+        self._jobs_table.viewport().installEventFilter(self)
         layout.addWidget(self._jobs_table)
 
         self._jobs_status_bar = QLabel()
@@ -108,19 +115,38 @@ class DataWindow(QWidget):
         toolbar.addWidget(self._btn_conv_refresh)
         layout.addLayout(toolbar)
 
-        self._conv_table = QTableWidget(0, 9)
+        self._conv_table = QTableWidget(0, 12)
         self._conv_table.setHorizontalHeaderLabels([
-            "招聘者", "公司", "职位", "最后消息", "平台状态", "业务状态", "账号", "时间", "备注",
+            "招聘者", "公司", "职位", "最后消息", "发送方", "未读数", "内容分类",
+            "平台状态", "业务状态", "账号", "时间", "备注",
         ])
-        self._conv_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header = self._conv_table.horizontalHeader()
+        widths = [80, 120, 100, 250, 60, 60, 80, 80, 80, 100, 140, 120]
+        for i, w in enumerate(widths):
+            header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+            self._conv_table.setColumnWidth(i, w)
+        header.setStretchLastSection(True)
         self._conv_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._conv_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._conv_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._conv_table.customContextMenuRequested.connect(self._conv_context_menu)
-        self._conv_table.cellDoubleClicked.connect(self._conv_cell_double_clicked)
+        self._conv_table.viewport().installEventFilter(self)
         layout.addWidget(self._conv_table)
 
         self._conv_status_bar = QLabel()
         layout.addWidget(self._conv_status_bar)
+
+    def eventFilter(self, obj: QWidget, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Wheel and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            table = self._jobs_table if obj is self._jobs_table.viewport() else \
+                    self._conv_table if obj is self._conv_table.viewport() else None
+            if table:
+                bar = table.horizontalScrollBar()
+                delta = getattr(event, "angleDelta", lambda: None)()
+                if delta:
+                    bar.setValue(bar.value() - delta.y())
+                    return True
+        return super().eventFilter(obj, event)
 
     def closeEvent(self, event):
         self.hide()
@@ -144,7 +170,7 @@ class DataWindow(QWidget):
             table.setItem(i, 2, QTableWidgetItem(j.get("salary_raw", "")))
             table.setItem(i, 3, QTableWidgetItem(j.get("status", "")))
             table.setItem(i, 4, QTableWidgetItem(j.get("account", "")))
-            table.setItem(i, 5, QTableWidgetItem(j.get("applied_at", "")[:16] if j.get("applied_at") else ""))
+            table.setItem(i, 5, QTableWidgetItem(j.get("applied_at", "").replace("T", " ")[:16] if j.get("applied_at") else ""))
             table.setItem(i, 6, QTableWidgetItem(j.get("note", "")))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, j.get("job_id", ""))
         total = len(self._storage.search_jobs())
@@ -167,11 +193,21 @@ class DataWindow(QWidget):
             table.setItem(i, 1, QTableWidgetItem(c.get("company", "")))
             table.setItem(i, 2, QTableWidgetItem(c.get("position", "")))
             table.setItem(i, 3, QTableWidgetItem(c.get("last_msg", "")))
-            table.setItem(i, 4, QTableWidgetItem(c.get("platform_status", "")))
-            table.setItem(i, 5, QTableWidgetItem(c.get("status", "")))
-            table.setItem(i, 6, QTableWidgetItem(c.get("account", "")))
-            table.setItem(i, 7, QTableWidgetItem(c.get("last_updated", "")[:16] if c.get("last_updated") else ""))
-            table.setItem(i, 8, QTableWidgetItem(c.get("note", "")))
+            table.setItem(i, 4, QTableWidgetItem(c.get("sender", "")))
+            uc = c.get("unread_count")
+            if uc == -1:
+                display_uc = "?"
+            elif uc is None or uc == "":
+                display_uc = ""
+            else:
+                display_uc = str(uc)
+            table.setItem(i, 5, QTableWidgetItem(display_uc))
+            table.setItem(i, 6, QTableWidgetItem(classify_msg_type(c.get("last_msg", ""), c.get("sender", ""))))
+            table.setItem(i, 7, QTableWidgetItem(c.get("platform_status", "")))
+            table.setItem(i, 8, QTableWidgetItem(c.get("status", "")))
+            table.setItem(i, 9, QTableWidgetItem(c.get("account", "")))
+            table.setItem(i, 10, QTableWidgetItem(c.get("last_updated", "").replace("T", " ")[:16] if c.get("last_updated") else ""))
+            table.setItem(i, 11, QTableWidgetItem(c.get("note", "")))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, c.get("conv_id", ""))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole + 1, c.get("account", ""))
 
@@ -265,9 +301,9 @@ class DataWindow(QWidget):
         conv_id_item = self._conv_table.item(row, 0)
         conv_id = conv_id_item.data(Qt.ItemDataRole.UserRole) if conv_id_item else ""
         account = conv_id_item.data(Qt.ItemDataRole.UserRole + 1) if conv_id_item else ""
-        if col == 5:
+        if col == 8:
             self._edit_conv_status(row, conv_id, account)
-        elif col == 8:
+        elif col == 11:
             self._edit_conv_note(row, conv_id, account)
 
     def _load_account_filter(self):
@@ -276,7 +312,7 @@ class DataWindow(QWidget):
             self._conv_account.addItem(a.id)
 
     def _edit_conv_note(self, row, conv_id, account):
-        current = self._conv_table.item(row, 8).text() if self._conv_table.item(row, 8) else ""
+        current = self._conv_table.item(row, 11).text() if self._conv_table.item(row, 11) else ""
         new_note, ok = QInputDialog.getText(self, "修改备注", "备注:", text=current)
         if ok:
             self._storage.update_conv_note(conv_id, account, new_note)
@@ -284,7 +320,7 @@ class DataWindow(QWidget):
 
     def _edit_conv_status(self, row, conv_id, account):
         statuses = ["新对话", "待回复", "已回复", "已读未回", "拒信", "邀约", "已删除", "已结束"]
-        current = self._conv_table.item(row, 5).text() if self._conv_table.item(row, 5) else ""
+        current = self._conv_table.item(row, 8).text() if self._conv_table.item(row, 8) else ""
         new_status, ok = QInputDialog.getItem(self, "修改状态", "新状态:", statuses, current=statuses.index(current) if current in statuses else 0)
         if ok and new_status:
             self._storage.update_conv_status(conv_id, account, new_status)

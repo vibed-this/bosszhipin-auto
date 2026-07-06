@@ -16,11 +16,19 @@ class DispatchStatus:
 
 
 class ConvStatus:
+    """交互状态 — 与消息内容分类正交。"""
     NEW = "新对话"
     PENDING_REPLY = "待回复"
     REPLIED = "已回复"
     READ_NO_REPLY = "已读未回"
-    REJECTION = "拒信"
-    INVITATION = "邀约"
     DELETED = "已删除"
     CLOSED = "已结束"
+
+
+class MsgType:
+    """消息内容分类 — 与交互状态正交。"""
+    NORMAL = "普通"
+    REJECTION = "拒信"
+    INVITATION = "邀约"
+    FILE = "文件"
+    UNKNOWN = "未知"
