@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from shutil import rmtree
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
@@ -118,10 +120,14 @@ class AccountWindow(QWidget):
             table.setItem(i, 4, QTableWidgetItem(str(daily_count)))
 
             enabled_item = QTableWidgetItem("是" if acc.enabled else "否")
-            enabled_item.setForeground(
-                Qt.GlobalColor.darkGreen if acc.enabled else Qt.GlobalColor.gray
-            )
             table.setItem(i, 5, enabled_item)
+
+            if not acc.enabled:
+                gray = Qt.GlobalColor.gray
+                for col in range(6):
+                    item = table.item(i, col)
+                    if item:
+                        item.setForeground(gray)
 
         self._status_label.setText(f"共 {len(cfg.accounts)} 个账号")
 
@@ -247,7 +253,7 @@ class AccountWindow(QWidget):
             return
         reply = QMessageBox.question(
             self, "确认删除",
-            f"确定从配置中删除账号「{acc.name}」？\n磁盘 profiles/{acc.id}/ 保留。",
+            f"确定删除账号「{acc.name}」？\n配置及磁盘 profiles/{acc.id}/ 将被一并删除。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -261,6 +267,11 @@ class AccountWindow(QWidget):
         bm = get_browser_manager()
         if bm:
             bm.remove_account(acc.id)
+
+        profile_dir = Path(cfg.browser.profiles_dir) / acc.id
+        if profile_dir.is_dir():
+            rmtree(profile_dir)
+
         self.refresh()
 
     def _toggle_enabled(self, row: int):
