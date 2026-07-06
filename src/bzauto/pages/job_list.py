@@ -28,7 +28,7 @@ _EXPECT_TAB = "a.expect-item"
 
 _JOB_PROJECT = {
     "title": f"{_JOB_TITLE}@text",
-    "salary_raw": f"{_SALARY}@text",
+    "salary": f"{_SALARY}@text",
     "company": f"{_COMPANY}@text",
     "href": f"{_JOB_LINK}@href",
 }
@@ -48,6 +48,18 @@ def _decode_salary_icon(text: str) -> str:
     return text
 
 
+def _parse_salary(text: str) -> tuple[int, int] | None:
+    """解析薪资字符串，返回 (min_k, max_k) 或 None。"""
+    m = re.search(r'(\d+)-(\d+)', text)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.search(r'(\d+)K', text)
+    if m:
+        v = int(m.group(1))
+        return v, v
+    return None
+
+
 class BossJobListPage(BasePage):
     """Boss直聘职位列表页面对象（选择器 + 操作方法）。"""
 
@@ -57,11 +69,15 @@ class BossJobListPage(BasePage):
         super().__init__(session)
 
     async def get_job_cards(self) -> list[dict[str, Any]]:
-        return await self._session.query(
+        cards = await self._session.query(
             select=_JOB_ITEM,
             project=_JOB_PROJECT,
             return_="list",
         )
+        for card in cards:
+            if "salary" in card:
+                card["salary"] = _decode_salary_icon(card["salary"])
+        return cards
 
     async def get_job_card_at(self, index: int) -> dict[str, Any] | None:
         raw = await self._session.query(
@@ -70,6 +86,8 @@ class BossJobListPage(BasePage):
             project=_JOB_PROJECT,
             return_="list",
         )
+        if raw and "salary" in raw[0]:
+            raw[0]["salary"] = _decode_salary_icon(raw[0]["salary"])
         return raw[0] if raw else None
 
     async def click_card_at(self, index: int) -> bool:
@@ -211,10 +229,12 @@ class BossJobListPage(BasePage):
         *,
         whitelist: list[str] | None = None,
         blacklist: list[str] | None = None,
+        min_salary: int | None = None,
+        max_salary: int | None = None,
         max_scrolls: int = 10,
         scroll_timeout: float = 5.0,
     ) -> AsyncIterator[tuple[dict[str, Any], int]]:
-        """包装 iter_job_cards，按白名单/黑名单过滤并去重。"""
+        """包装 iter_job_cards，按白名单/黑名单/薪资过滤并去重。"""
         seen: set[tuple[str, str]] = set()
         async for card, idx in self.iter_job_cards(
             max_scrolls=max_scrolls,
@@ -225,6 +245,15 @@ class BossJobListPage(BasePage):
                 continue
             if blacklist and any(kw in title for kw in blacklist):
                 continue
+
+            salary = _parse_salary(card.get("salary") or "")
+            if min_salary is not None:
+                if salary is None or salary[0] < min_salary:
+                    continue
+            if max_salary is not None:
+                if salary is None or salary[1] < max_salary:
+                    continue
+
             key = (card.get("title") or "", card.get("company") or "")
             if key in seen:
                 continue
