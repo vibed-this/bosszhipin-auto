@@ -52,7 +52,7 @@ class _AccountTab:
 
     def __init__(self, account_id: str, name: str, profile: QWebEngineProfile,
                  view: QWebEngineView, page: QWebEnginePage,
-                 overlay: DotOverlay,
+                 # overlay: DotOverlay,
                  url_input: QLineEdit | None = None,
                  back_btn: QPushButton | None = None,
                  forward_btn: QPushButton | None = None,
@@ -62,7 +62,7 @@ class _AccountTab:
         self.profile = profile
         self.view = view
         self.page = page
-        self.overlay = overlay
+        # self.overlay = overlay
         self.url_input = url_input
         self.back_btn = back_btn
         self.forward_btn = forward_btn
@@ -91,13 +91,13 @@ class BrowserManager(QMainWindow):
         self._tabs.currentChanged.connect(self._on_tab_changed)
 
     def _add_account_tab(self, acc: dict[str, Any]) -> None:
-        account_id = acc["id"]
+        account_id: str = acc["id"]
         name = acc.get("name", account_id)
         profile_dir = Path(self._profiles_dir) / account_id
         profile_dir.mkdir(parents=True, exist_ok=True)
 
         profile = QWebEngineProfile(account_id, self)
-        profile.setPersistentStoragePath(str(profile_dir))
+        profile.setPersistentStoragePath(profile_dir.absolute().as_posix())
         profile.setPersistentCookiesPolicy(
             QWebEngineProfile. PersistentCookiesPolicy.ForcePersistentCookies
         )
@@ -173,7 +173,7 @@ class BrowserManager(QMainWindow):
 
         self._account_tabs[account_id] = _AccountTab(
             account_id=account_id, name=name, profile=profile,
-            view=view, page=page, overlay=overlay,
+            view=view, page=page, # overlay=overlay,
             url_input=url_input,
             back_btn=back_btn,
             forward_btn=forward_btn,
