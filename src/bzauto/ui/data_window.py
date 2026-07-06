@@ -203,7 +203,9 @@ class DataWindow(QWidget):
             table.setItem(i, 3, QTableWidgetItem(c.get("last_msg", "")))
             sender_raw = c.get("sender", "")
             sender_display = {"self": "自己", "other": "对方"}.get(sender_raw, sender_raw)
-            table.setItem(i, 4, QTableWidgetItem(sender_display))
+            item = QTableWidgetItem(sender_display)
+            item.setData(Qt.ItemDataRole.UserRole + 2, sender_raw)
+            table.setItem(i, 4, item)
             uc = c.get("unread_count")
             if uc == -1:
                 display_uc = "?"
@@ -314,7 +316,9 @@ class DataWindow(QWidget):
     def _copy_conv_row(self, row):
         t = self._conv_table
         cells = {i: t.item(row, i).text() if t.item(row, i) else "" for i in range(12)}
-        msg_type = classify_msg_type(cells[3], cells[4])
+        sender_item = t.item(row, 4)
+        sender_raw = sender_item.data(Qt.ItemDataRole.UserRole + 2) if sender_item else ""
+        msg_type = classify_msg_type(cells[3], sender_raw)
         lines = [
             f"{cells[0]} | {cells[1]} | {cells[2]}",
             f"消息：{cells[10]} {cells[3]}",
