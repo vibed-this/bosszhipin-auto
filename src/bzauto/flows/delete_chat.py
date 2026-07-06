@@ -12,7 +12,7 @@ from bzauto.server.tab_session import TabSession
 
 log = logging.getLogger("flow.delete_chat")
 
-_DELETE_KEYWORDS = ["抱歉", "不好意思", "对不起", "不合适", "不太合适"]
+_DELETE_KEYWORDS = ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "荣幸"]
 
 
 def _should_delete(status: str, last_msg: str) -> bool:
