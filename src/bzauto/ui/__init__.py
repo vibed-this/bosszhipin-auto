@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import threading
+import time
 import traceback
 from pathlib import Path
 from typing import Any
@@ -26,9 +27,11 @@ from bzauto.storage import Storage
 from bzauto.task_runner import ScheduledTask, TaskRunner
 from bzauto.scheduler import (
     BzScheduler,
-    ScrapeTask,
-    ScrapeChatTask,
     DeleteChatTask,
+    DispatchTask,
+    ScanTask,
+    ScrapeChatTask,
+    ScrapeTask,
     ScrapeAndChatTask,
 )
 
@@ -47,6 +50,11 @@ class _TaskBridge(QObject):
     buttons_enabled = Signal(bool)
     data_updated = Signal()
 
+    # debug 窗口信号
+    debug_result = Signal(str, str, float)   # task_name, result_text, elapsed
+    debug_error = Signal(str, str)           # task_name, error_text
+    debug_running = Signal(bool)             # running state
+
 
 class BzAutoApp:
     """主应用控制器：单一后台线程 + event loop + 任务管理。"""
@@ -59,6 +67,7 @@ class BzAutoApp:
         self._control = ControlPanel()
         self._log_win = LogWindow()
         self._data_win: DataWindow | None = None
+        self._debug_win: DebugWindow | None = None
         self._bridge = _TaskBridge()
 
         # 后台线程 + event loop（所有异步操作在此执行）
@@ -133,6 +142,7 @@ class BzAutoApp:
         self._control.btn_batch.clicked.connect(lambda: self._on_batch_chat())
         self._control.btn_config.clicked.connect(self._on_open_config)
         self._control.btn_data.clicked.connect(self._on_open_data)
+        self._control.btn_debug.clicked.connect(self._on_open_debug)
 
     def _on_open_config(self) -> None:
         self._config_dlg = ConfigDialog(self._control)
@@ -153,6 +163,19 @@ class BzAutoApp:
     def _on_data_updated(self) -> None:
         if self._data_win is not None and self._data_win.isVisible():
             self._data_win.refresh_all()
+
+    # ── Debug 窗口管理 ──
+
+    def _on_open_debug(self) -> None:
+        if self._debug_win is None:
+            from bzauto.ui.debug_window import DebugWindow
+            self._debug_win = DebugWindow(self)
+            self._bridge.debug_result.connect(self._debug_win.on_result)
+            self._bridge.debug_error.connect(self._debug_win.on_error)
+            self._bridge.debug_running.connect(self._debug_win.on_running)
+        self._debug_win.show()
+        self._debug_win.raise_()
+        self._debug_win._refresh_status()
 
     # ── UI 按钮 → ScheduledTask ──
 
@@ -217,6 +240,135 @@ class BzAutoApp:
             exc = future.exception()
             tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
             log.error("任务失败:\n%s", tb)
+        self._bridge.buttons_enabled.emit(True)
+
+    # ── 公共 Debug 方法 ──
+
+    def run_debug_task(self, task_name: str, account_id: str,
+                       via_runner: bool, timeout: float = 120) -> None:
+        """创建 ScheduledTask，选择执行路径，带超时保护。"""
+        if self._current_task is not None and not self._current_task.done():
+            log.warning("已有任务在运行，请等待完成")
+            return
+        self._bridge.debug_running.emit(True)
+        self._bridge.buttons_enabled.emit(False)
+        log.info("开始 Debug %s (account=%s, via_runner=%s, timeout=%s)",
+                 task_name, account_id, via_runner, timeout)
+        self._current_task = asyncio.run_coroutine_threadsafe(
+            self._run_debug_async(task_name, account_id, via_runner, timeout),
+            self._loop,
+        )
+        self._current_task.add_done_callback(self._on_debug_done)
+
+    def run_debug_trigger(self, trigger_name: str, timeout: float = 300) -> None:
+        """调用 scheduler._trigger_* 完整方法，带超时保护。"""
+        if self._current_task is not None and not self._current_task.done():
+            log.warning("已有任务在运行，请等待完成")
+            return
+        self._bridge.debug_running.emit(True)
+        self._bridge.buttons_enabled.emit(False)
+        log.info("开始 Debug 触发%s (timeout=%s)", trigger_name, timeout)
+        self._current_task = asyncio.run_coroutine_threadsafe(
+            self._run_debug_trigger_async(trigger_name, timeout),
+            self._loop,
+        )
+        self._current_task.add_done_callback(self._on_debug_done)
+
+    def get_debug_status(self) -> str:
+        """返回调度器状态文本（jobs + 连接账号 + 配额）。"""
+        lines: list[str] = []
+        if self._scheduler and self._scheduler._scheduler.running:
+            for job in self._scheduler._scheduler.get_jobs():
+                nr = job.next_run_time
+                if nr:
+                    lines.append(f"{job.id}: {nr:%Y-%m-%d %H:%M:%S}")
+                else:
+                    lines.append(f"{job.id}: 未调度")
+        else:
+            lines.append("调度器未运行")
+        try:
+            connected = get_registry().get_connected_accounts()
+            if connected:
+                lines.append(f"\n已连接账号: {', '.join(connected)}")
+            else:
+                lines.append("\n已连接账号: 无")
+        except Exception:
+            lines.append("\n已连接账号: 获取失败")
+        for acc in self._storage.get_enabled_accounts():
+            aid = acc["account_id"]
+            remaining = self._storage.get_remaining_quota(aid)
+            lines.append(f"  {acc.get('name', aid)}: 剩余 {remaining}")
+        return "\n".join(lines)
+
+    # ── Debug 后台协程 ──
+
+    @staticmethod
+    def _create_debug_task(task_name: str, account_id: str, storage: Storage) -> ScheduledTask:
+        from bzauto.config import get_config
+        mapping = {
+            "采集": ScrapeTask(account_id, storage),
+            "投递": DispatchTask(account_id, storage, get_config().schedule.dispatch_batch_size),
+            "扫描": ScanTask(account_id, storage),
+            "聊天爬取": ScrapeChatTask(account_id, storage),
+            "删拒": DeleteChatTask(account_id, storage),
+            "抓取沟通": ScrapeAndChatTask(account_id, storage),
+        }
+        return mapping[task_name]
+
+    async def _run_debug_async(self, task_name: str, account_id: str,
+                               via_runner: bool, timeout: float) -> None:
+        start = time.monotonic()
+        try:
+            await start_server()
+            task = self._create_debug_task(task_name, account_id, self._storage)
+
+            if via_runner:
+                while self._task_runner is None:
+                    await asyncio.sleep(0.05)
+                result = await asyncio.wait_for(
+                    self._task_runner.submit_and_wait(task), timeout=timeout)
+            else:
+                result = await asyncio.wait_for(task.execute(), timeout=timeout)
+
+            elapsed = time.monotonic() - start
+            lines = format_task_lines(task.name, result)
+            text = f"result = {result}\n\n通知预览:\n" + "\n".join(lines) if lines else f"result = {result}"
+            if lines:
+                await get_notifier().send(
+                    f"[DEBUG] {task.name}完成", "\n".join(lines))
+            self._bridge.debug_result.emit(task.name, text, elapsed)
+
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - start
+            path = "TaskRunner" if via_runner else "直接执行"
+            self._bridge.debug_error.emit(
+                task_name, f"超时 ({elapsed:.1f}s, {path})")
+        except Exception:
+            self._bridge.debug_error.emit(task_name, traceback.format_exc())
+
+    async def _run_debug_trigger_async(self, trigger_name: str, timeout: float) -> None:
+        start = time.monotonic()
+        try:
+            await start_server()
+            trigger_map = {
+                "采集": self._scheduler._trigger_scrape,
+                "投递": self._scheduler._trigger_dispatch,
+                "扫描": self._scheduler._trigger_scan,
+            }
+            await asyncio.wait_for(trigger_map[trigger_name](), timeout=timeout)
+            elapsed = time.monotonic() - start
+            self._bridge.debug_result.emit(
+                f"触发{trigger_name}", "完整触发完成 (通知已发送)", elapsed)
+        except asyncio.TimeoutError:
+            elapsed = time.monotonic() - start
+            self._bridge.debug_error.emit(
+                trigger_name, f"超时 ({elapsed:.1f}s, 完整触发)")
+        except Exception:
+            self._bridge.debug_error.emit(trigger_name, traceback.format_exc())
+
+    def _on_debug_done(self, future: asyncio.Future) -> None:
+        """Debug 任务完成回调：恢复按钮状态（异常已在协程内处理）。"""
+        self._bridge.debug_running.emit(False)
         self._bridge.buttons_enabled.emit(True)
 
     def run(self) -> None:

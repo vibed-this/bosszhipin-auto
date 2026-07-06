@@ -75,6 +75,12 @@ class ControlPanel(QWidget):
         self.btn_data.setFixedHeight(28)
         layout.addWidget(self.btn_data)
 
+        # Button: DEBUG
+        layout.addSpacing(2)
+        self.btn_debug = QPushButton("DEBUG")
+        self.btn_debug.setFixedHeight(28)
+        layout.addWidget(self.btn_debug)
+
         # Separator
         layout.addSpacing(4)
         sep3 = QFrame()
