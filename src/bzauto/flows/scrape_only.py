@@ -79,8 +79,8 @@ class BossScrapeOnlyFlow(BaseFlow[BossJobListPage]):
             all_jobs.append(card)
 
             if self._storage:
-                db_dict = card.to_db_dict(self._account_id)
-                self._storage.upsert_job(db_dict)
+                job_doc = card.to_doc(self._account_id)
+                self._storage.upsert_job(job_doc)
                 self._storage.add_seen_job_hrefs([card.href])
 
         log.info("完成: 共 %d 条匹配职位", len(all_jobs))

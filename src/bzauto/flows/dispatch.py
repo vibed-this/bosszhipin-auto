@@ -39,7 +39,7 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
         failed = 0
 
         for job in jobs:
-            job_id = job.get("job_id", "")
+            job_id = job.job_id
             claimed = self._storage.claim_job(job_id, self._account_id)
             if not claimed:
                 log.debug("job 已被领取: %s", job_id)
@@ -51,9 +51,9 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 )
                 await self._session.activate()
 
-                idx = await self._page.find_card_by_href(job.get("href", ""))
+                idx = await self._page.find_card_by_href(job.href)
                 if idx < 0:
-                    log.warning("未找到卡片: job=%s href=%s", job_id, job.get("href", ""))
+                    log.warning("未找到卡片: job=%s href=%s", job_id, job.href)
                     self._storage.mark_job_failed(job_id)
                     failed += 1
                     continue
@@ -72,7 +72,7 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 self._storage.mark_job_success(job_id)
                 self._storage.increment_daily_count(self._account_id)
                 success += 1
-                log.info("投递成功: %s — %s", job.get("title", ""), job.get("company", ""))
+                log.info("投递成功: %s — %s", job.title, job.company)
 
                 remaining = self._storage.get_remaining_quota(self._account_id)
                 if remaining <= 0:

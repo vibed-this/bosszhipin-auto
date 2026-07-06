@@ -309,9 +309,8 @@ class BzAutoApp:
         except Exception:
             lines.append("\n已连接账号: 获取失败")
         for acc in self._storage.get_enabled_accounts():
-            aid = acc["account_id"]
-            remaining = self._storage.get_remaining_quota(aid)
-            lines.append(f"  {acc.get('name', aid)}: 剩余 {remaining}")
+            remaining = self._storage.get_remaining_quota(acc.account_id)
+            lines.append(f"  {acc.name or acc.account_id}: 剩余 {remaining}")
         return "\n".join(lines)
 
     # ── Debug 后台协程 ──

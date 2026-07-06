@@ -1,80 +1,143 @@
+"""应用配置 — TOML 文件读写 + Pydantic 校验。"""
+
 from __future__ import annotations
 
 import logging
 import os
 import tomllib
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import tomli_w
+from pydantic import BaseModel, ConfigDict
 
 log = logging.getLogger("boss.config")
 
 
-@dataclass
-class ServerConfig:
+class ServerConfig(BaseModel):
+    """服务监听配置。
+
+    :ivar host: 监听地址
+    :ivar port: 监听端口
+    """
+
     host: str = "127.0.0.1"
     port: int = 8765
 
 
-@dataclass
-class StorageConfig:
+class StorageConfig(BaseModel):
+    """存储配置。
+
+    :ivar db_path: TinyDB 数据库文件路径
+    """
+
     db_path: str = "data/bzauto.tinydb"
 
 
-@dataclass
-class ScrapeFilterConfig:
-    whitelist: list[str] = field(default_factory=lambda: ["前端", "全栈", "Web"])
-    blacklist: list[str] = field(default_factory=lambda: ["出差"])
+class ScrapeFilterConfig(BaseModel):
+    """采集过滤配置。
+
+    :ivar whitelist: 职位名称白名单（包含任一即匹配）
+    :ivar blacklist: 职位名称黑名单（包含任一即排除）
+    :ivar min_salary: 最低薪资过滤 (K)
+    :ivar max_salary: 最高薪资过滤 (K)
+    """
+
+    whitelist: list[str] = ["前端", "全栈", "Web"]
+    blacklist: list[str] = ["出差"]
     min_salary: int = 5
     max_salary: int = 7
 
 
-@dataclass
-class ScrapeConfig:
+class ScrapeConfig(BaseModel):
+    """采集配置。
+
+    :ivar scroll_timeout: 滚动超时（秒）
+    :ivar page_load_timeout: 页面加载超时（秒）
+    :ivar filter: 过滤条件
+    """
+
     scroll_timeout: float = 5.0
     page_load_timeout: float = 20.0
-    filter: ScrapeFilterConfig = field(default_factory=ScrapeFilterConfig)
+    filter: ScrapeFilterConfig = ScrapeFilterConfig()
 
 
-@dataclass
-class DeleteConfig:
-    keywords: list[str] = field(default_factory=lambda: ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "荣幸", "遗憾", "不太匹配"])
+class DeleteConfig(BaseModel):
+    """删拒关键词配置。
+
+    :ivar keywords: 拒信关键词列表（消息包含任一即判为拒信）
+    """
+
+    keywords: list[str] = ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "荣幸", "遗憾", "不太匹配"]
 
 
-@dataclass
-class FollowUpConfig:
+class FollowUpConfig(BaseModel):
+    """跟进配置。
+
+    :ivar enabled: 是否启用跟进
+    :ivar days_threshold: 跟进天数阈值
+    """
+
     enabled: bool = False
     days_threshold: int = 50
 
 
-@dataclass
-class ScheduleConfig:
+class ScheduleConfig(BaseModel):
+    """定时调度配置。
+
+    :ivar scrape_time: 采集触发时间 (HH:MM)
+    :ivar dispatch_times: 投递触发时间列表 (HH:MM)
+    :ivar dispatch_batch_size: 每批投递数量上限
+    :ivar scan_interval_minutes: 扫描间隔（分钟）
+    :ivar claim_timeout_minutes: claim 超时释放（分钟）
+    """
+
     scrape_time: str = "08:00"
-    dispatch_times: list[str] = field(default_factory=lambda: ["09:00", "14:00", "19:00"])
+    dispatch_times: list[str] = ["09:00", "14:00", "19:00"]
     dispatch_batch_size: int = 50
     scan_interval_minutes: int = 60
     claim_timeout_minutes: int = 30
 
 
-@dataclass
-class NapCatConfig:
+class NapCatConfig(BaseModel):
+    """NapCat OneBot v11 配置。
+
+    :ivar base_url: NapCat HTTP API 地址
+    :ivar msg_type: 消息类型（group / private）
+    :ivar target_id: 目标群号或用户号
+    :ivar token: API 鉴权 Token
+    """
+
     base_url: str = "http://127.0.0.1:3000"
     msg_type: str = "group"
     target_id: int = 123456789
     token: str = ""
 
 
-@dataclass
-class NotificationConfig:
+class NotificationConfig(BaseModel):
+    """通知配置。
+
+    :ivar enabled: 是否启用通知
+    :ivar merge: 是否合并多条通知
+    :ivar napcat: NapCat 连接配置
+    """
+
     enabled: bool = True
     merge: bool = True
-    napcat: NapCatConfig = field(default_factory=NapCatConfig)
+    napcat: NapCatConfig = NapCatConfig()
 
 
-@dataclass
-class AccountConfig:
+class AccountConfig(BaseModel):
+    """账号配置。
+
+    :ivar id: 账号唯一标识
+    :ivar name: 账号显示名称
+    :ivar profile: Chrome 用户配置文件名称
+    :ivar daily_limit: 每日投递上限
+    :ivar enabled: 是否启用
+    :ivar role: 角色（scraper / dispatcher）
+    """
+
     id: str = ""
     name: str = ""
     profile: str = "Default"
@@ -83,16 +146,22 @@ class AccountConfig:
     role: str = "dispatcher"
 
 
-@dataclass
-class AppConfig:
-    server: ServerConfig = field(default_factory=ServerConfig)
-    storage: StorageConfig = field(default_factory=StorageConfig)
-    scrape: ScrapeConfig = field(default_factory=ScrapeConfig)
-    delete: DeleteConfig = field(default_factory=DeleteConfig)
-    follow_up: FollowUpConfig = field(default_factory=FollowUpConfig)
-    schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
-    notification: NotificationConfig = field(default_factory=NotificationConfig)
-    accounts: list[AccountConfig] = field(default_factory=list)
+class AppConfig(BaseModel):
+    """顶层应用配置。
+
+    拒绝未知字段（extra="forbid"），确保 TOML 中的拼写错误在加载时即可被发现。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    server: ServerConfig = ServerConfig()
+    storage: StorageConfig = StorageConfig()
+    scrape: ScrapeConfig = ScrapeConfig()
+    delete: DeleteConfig = DeleteConfig()
+    follow_up: FollowUpConfig = FollowUpConfig()
+    schedule: ScheduleConfig = ScheduleConfig()
+    notification: NotificationConfig = NotificationConfig()
+    accounts: list[AccountConfig] = []
 
 
 _CONFIG: AppConfig | None = None
@@ -109,6 +178,7 @@ def _default_config_path() -> Path:
 
 
 def _write_default_template(path: Path) -> None:
+    """写入默认配置文件模板。"""
     template = """\
 [server]
 host = "127.0.0.1"
@@ -172,55 +242,14 @@ role = "dispatcher"
     log.info("已创建默认配置文件: %s", path)
 
 
-def _dataclass_from_dict(cls: type, data: dict) -> Any:
-    """递归将 dict 转为 dataclass。"""
-    from dataclasses import fields
-    field_types = {f.name: f.type for f in fields(cls)}
-    kwargs = {}
-    for key, value in data.items():
-        if key in field_types:
-            ft = field_types[key]
-            if hasattr(ft, "__origin__") and ft.__origin__ is list:  # type: ignore[union-attr]
-                inner = ft.__args__[0] if ft.__args__ else None  # type: ignore[union-attr]
-                if inner and hasattr(inner, "__dataclass_fields__"):
-                    kwargs[key] = [_dataclass_from_dict(inner, v) for v in value]
-                else:
-                    kwargs[key] = value
-            elif hasattr(ft, "__dataclass_fields__"):
-                kwargs[key] = _dataclass_from_dict(ft, value) if isinstance(value, dict) else ft()
-            else:
-                kwargs[key] = value
-    return cls(**kwargs)
-
-
-def _app_config_from_dict(data: dict) -> AppConfig:
-    server = _dataclass_from_dict(ServerConfig, data.get("server", {}))
-    storage = _dataclass_from_dict(StorageConfig, data.get("storage", {}))
-    scrape_data = data.get("scrape", {})
-    filter_data = scrape_data.pop("filter", {}) if isinstance(scrape_data, dict) else {}
-    scrape = _dataclass_from_dict(ScrapeConfig, scrape_data)
-    scrape.filter = _dataclass_from_dict(ScrapeFilterConfig, filter_data)
-    delete = _dataclass_from_dict(DeleteConfig, data.get("delete", {}))
-    follow_up = _dataclass_from_dict(FollowUpConfig, data.get("follow_up", {}))
-    schedule = _dataclass_from_dict(ScheduleConfig, data.get("schedule", {}))
-    notify_data = data.get("notification", {})
-    napcat_data = notify_data.pop("napcat", {}) if isinstance(notify_data, dict) else {}
-    notification = _dataclass_from_dict(NotificationConfig, notify_data)
-    notification.napcat = _dataclass_from_dict(NapCatConfig, napcat_data)
-    accounts = [_dataclass_from_dict(AccountConfig, a) for a in data.get("accounts", [])]
-    return AppConfig(
-        server=server,
-        storage=storage,
-        scrape=scrape,
-        delete=delete,
-        follow_up=follow_up,
-        schedule=schedule,
-        notification=notification,
-        accounts=accounts,
-    )
-
-
 def get_config() -> AppConfig:
+    """获取全局配置单例。
+
+    首次调用时从 TOML 文件加载，之后返回缓存。
+    若文件不存在则创建默认模板。
+
+    :returns: AppConfig 实例
+    """
     global _CONFIG, _CONFIG_PATH
     if _CONFIG is not None:
         return _CONFIG
@@ -234,6 +263,11 @@ def get_config() -> AppConfig:
 
 
 def reload_config() -> AppConfig:
+    """重新加载配置文件。
+
+    :returns: 新的 AppConfig 实例
+    :raises FileNotFoundError: 配置文件不存在
+    """
     global _CONFIG
     path = _CONFIG_PATH or _default_config_path()
     if not path.exists():
@@ -244,12 +278,22 @@ def reload_config() -> AppConfig:
 
 
 def _load_config(path: Path) -> AppConfig:
+    """从 TOML 文件加载并校验配置。
+
+    :param path: 配置文件路径
+    :returns: 校验后的 AppConfig 实例
+    """
     with open(path, "rb") as f:
         data = tomllib.load(f)
-    return _app_config_from_dict(data)
+    return AppConfig.model_validate(data)  # type: ignore[no-any-return]
 
 
 def save_config(config: AppConfig, path: Path | None = None) -> None:
+    """保存配置到 TOML 文件。
+
+    :param config: AppConfig 实例
+    :param path: 目标路径，None 则使用当前配置路径
+    """
     p = path or _CONFIG_PATH or _default_config_path()
     data = _app_config_to_dict(config)
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -259,15 +303,17 @@ def save_config(config: AppConfig, path: Path | None = None) -> None:
 
 
 def _app_config_to_dict(config: AppConfig) -> dict:
-    def _to_dict(obj: Any) -> Any:
-        if hasattr(obj, "__dataclass_fields__"):
-            from dataclasses import fields
-            return {f.name: _to_dict(getattr(obj, f.name)) for f in fields(obj)}
-        if isinstance(obj, list):
-            return [_to_dict(v) for v in obj]
-        return obj
-    return _to_dict(config)
+    """将 AppConfig 转为可序列化的 dict。
+
+    :param config: AppConfig 实例
+    :returns: 纯 Python dict（适合 TOML 序列化）
+    """
+    return config.model_dump(exclude_defaults=False, mode="python")
 
 
 def get_config_path() -> Path:
+    """获取当前配置文件的路径。
+
+    :returns: 配置文件路径
+    """
     return _CONFIG_PATH or _default_config_path()

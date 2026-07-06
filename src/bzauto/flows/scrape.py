@@ -7,7 +7,7 @@ import random
 
 from bzauto.config import get_config
 from bzauto.flows.base import BaseFlow
-from bzauto.models import JobCard
+from bzauto.models import JobCard, make_job_id
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.server.tab_session import TabSession
 from bzauto.storage import Storage
@@ -84,8 +84,8 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
 
             # DB upsert
             if self._storage:
-                db_dict = card.to_db_dict(self._account_id)
-                self._storage.upsert_job(db_dict)
+                job_doc = card.to_doc(self._account_id)
+                self._storage.upsert_job(job_doc)
                 self._storage.add_seen_job_hrefs([card.href])
 
             # 沟通前检查配额
@@ -106,7 +106,7 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
                 break
 
             if self._storage:
-                self._storage.mark_job_success(card.href.rsplit("/", 1)[-1].replace(".html", ""))
+                self._storage.mark_job_success(make_job_id(card.href))
                 self._storage.increment_daily_count(self._account_id)
 
             await asyncio.sleep(random.uniform(0.5, 1.0))

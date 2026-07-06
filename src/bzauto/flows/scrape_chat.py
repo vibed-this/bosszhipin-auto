@@ -7,7 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from bzauto.enums import ConvStatus
+from bzauto.enums import ConvStatus, MsgType
 from bzauto.flows.base import BaseFlow
 from bzauto.models import ChatItem, classify_msg_type
 from bzauto.pages.chat_list import BossChatListPage, _CHAT_URL
@@ -68,15 +68,15 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         # 构建已有对话查找表 (conv_id, account) → status
         existing_all = storage.get_conversations("", "")
         existing_map: dict[tuple[str, str], str] = {
-            (c.get("conv_id", ""), c.get("account", "")): c.get("status", ConvStatus.NEW)
+            (c.conv_id, c.account): c.status or ConvStatus.NEW
             for c in existing_all
         }
 
         for item in all_items:
-            conv_dict = item.to_db_dict(self._account_id)
-            conv_id = conv_dict["conv_id"]
+            conv_doc = item.to_doc(self._account_id)
+            conv_id = conv_doc.conv_id
 
-            is_new = storage.upsert_conversation(conv_dict)
+            is_new = storage.upsert_conversation(conv_doc)
             if is_new:
                 new_count += 1
                 old_status = ConvStatus.NEW
@@ -86,7 +86,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
             status = infer_status(item.sender, item.unread_count, old_status)
             storage.update_conv_status(conv_id, self._account_id, status)
 
-            if classify_msg_type(item.lastMsg, item.sender) == "拒信":
+            if classify_msg_type(item.lastMsg, item.sender) is MsgType.REJECTION:
                 rejections.append(f"{item.name}·{item.company}: {item.lastMsg}")
             if item.sender == "other" and item.unread_count > 0:
                 unread.append(f"{item.name}·{item.company}")

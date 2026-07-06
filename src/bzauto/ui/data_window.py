@@ -170,14 +170,14 @@ class DataWindow(QWidget):
         table = self._jobs_table
         table.setRowCount(len(jobs))
         for i, j in enumerate(jobs):
-            table.setItem(i, 0, QTableWidgetItem(j.get("title", "")))
-            table.setItem(i, 1, QTableWidgetItem(j.get("company", "")))
-            table.setItem(i, 2, QTableWidgetItem(j.get("salary_raw", "")))
-            table.setItem(i, 3, QTableWidgetItem(j.get("status", "")))
-            table.setItem(i, 4, QTableWidgetItem(j.get("account", "")))
-            table.setItem(i, 5, QTableWidgetItem(j.get("applied_at", "").replace("T", " ")[:16] if j.get("applied_at") else ""))
-            table.setItem(i, 6, QTableWidgetItem(j.get("note", "")))
-            table.item(i, 0).setData(Qt.ItemDataRole.UserRole, j.get("job_id", ""))
+            table.setItem(i, 0, QTableWidgetItem(j.title))
+            table.setItem(i, 1, QTableWidgetItem(j.company))
+            table.setItem(i, 2, QTableWidgetItem(j.salary_raw))
+            table.setItem(i, 3, QTableWidgetItem(j.status))
+            table.setItem(i, 4, QTableWidgetItem(j.account))
+            table.setItem(i, 5, QTableWidgetItem(j.applied_at.replace("T", " ")[:16] if j.applied_at else ""))
+            table.setItem(i, 6, QTableWidgetItem(j.note))
+            table.item(i, 0).setData(Qt.ItemDataRole.UserRole, j.job_id)
         total = len(self._storage.search_jobs())
         filtered = len(jobs)
         self._jobs_status_bar.setText(f"总 {total} 条 | 筛选 {filtered} 条")
@@ -193,35 +193,34 @@ class DataWindow(QWidget):
         convs = self._storage.search_conversations(keyword=keyword, status=status, account=account)
         msg_type_filter = self._conv_msg_type.currentText()
         if msg_type_filter != "全部":
-            convs = [c for c in convs if classify_msg_type(c.get("last_msg", ""), c.get("sender", "")) == msg_type_filter]
+            convs = [c for c in convs if classify_msg_type(c.last_msg, c.sender).value == msg_type_filter]
         table = self._conv_table
         table.setRowCount(len(convs))
         for i, c in enumerate(convs):
-            table.setItem(i, 0, QTableWidgetItem(c.get("name", "")))
-            table.setItem(i, 1, QTableWidgetItem(c.get("company", "")))
-            table.setItem(i, 2, QTableWidgetItem(c.get("position", "")))
-            table.setItem(i, 3, QTableWidgetItem(c.get("last_msg", "")))
-            sender_raw = c.get("sender", "")
+            table.setItem(i, 0, QTableWidgetItem(c.name))
+            table.setItem(i, 1, QTableWidgetItem(c.company))
+            table.setItem(i, 2, QTableWidgetItem(c.position))
+            table.setItem(i, 3, QTableWidgetItem(c.last_msg))
+            sender_raw = c.sender
             sender_display = {"self": "自己", "other": "对方"}.get(sender_raw, sender_raw)
             item = QTableWidgetItem(sender_display)
             item.setData(Qt.ItemDataRole.UserRole + 2, sender_raw)
             table.setItem(i, 4, item)
-            uc = c.get("unread_count")
-            if uc == -1:
+            if c.unread_count == -1:
                 display_uc = "?"
-            elif uc is None or uc == "":
+            elif c.unread_count == 0:
                 display_uc = ""
             else:
-                display_uc = str(uc)
+                display_uc = str(c.unread_count)
             table.setItem(i, 5, QTableWidgetItem(display_uc))
-            table.setItem(i, 6, QTableWidgetItem(classify_msg_type(c.get("last_msg", ""), c.get("sender", ""))))
-            table.setItem(i, 7, QTableWidgetItem(c.get("platform_status", "")))
-            table.setItem(i, 8, QTableWidgetItem(c.get("status", "")))
-            table.setItem(i, 9, QTableWidgetItem(c.get("account", "")))
-            table.setItem(i, 10, QTableWidgetItem(c.get("last_updated", "").replace("T", " ")[:16] if c.get("last_updated") else ""))
-            table.setItem(i, 11, QTableWidgetItem(c.get("note", "")))
-            table.item(i, 0).setData(Qt.ItemDataRole.UserRole, c.get("conv_id", ""))
-            table.item(i, 0).setData(Qt.ItemDataRole.UserRole + 1, c.get("account", ""))
+            table.setItem(i, 6, QTableWidgetItem(classify_msg_type(c.last_msg, c.sender)))
+            table.setItem(i, 7, QTableWidgetItem(c.platform_status))
+            table.setItem(i, 8, QTableWidgetItem(c.status))
+            table.setItem(i, 9, QTableWidgetItem(c.account))
+            table.setItem(i, 10, QTableWidgetItem(c.last_updated.replace("T", " ")[:16] if c.last_updated else ""))
+            table.setItem(i, 11, QTableWidgetItem(c.note))
+            table.item(i, 0).setData(Qt.ItemDataRole.UserRole, c.conv_id)
+            table.item(i, 0).setData(Qt.ItemDataRole.UserRole + 1, c.account)
 
     def _jobs_context_menu(self, pos):
         item = self._jobs_table.itemAt(pos)
@@ -283,11 +282,12 @@ class DataWindow(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "导出 CSV", "jobs.csv", "CSV (*.csv)")
         if not path:
             return
+        fieldnames = ["title", "company", "salary_raw", "status", "account", "applied_at", "href", "note"]
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.DictWriter(f, fieldnames=["title", "company", "salary_raw", "status", "account", "applied_at", "href", "note"])
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for j in jobs:
-                writer.writerow({k: j.get(k, "") for k in writer.fieldnames})
+                writer.writerow({k: getattr(j, k, "") for k in fieldnames})
 
     def _conv_context_menu(self, pos):
         item = self._conv_table.itemAt(pos)

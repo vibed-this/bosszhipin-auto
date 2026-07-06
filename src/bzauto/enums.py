@@ -1,4 +1,9 @@
-class JobStatus:
+from enum import StrEnum
+
+
+class JobStatus(StrEnum):
+    """职位业务状态枚举。"""
+
     PENDING = "已沟通"
     GREETED = "已打招呼"
     HR_READ = "HR已读"
@@ -8,15 +13,18 @@ class JobStatus:
     CLOSED = "已结束"
 
 
-class DispatchStatus:
+class DispatchStatus(StrEnum):
+    """派发状态枚举 — 控制 job 的领取与处理流程。"""
+
     PENDING = "pending"
     CLAIMED = "claimed"
     SUCCESS = "success"
     FAILED = "failed"
 
 
-class ConvStatus:
-    """交互状态 — 与消息内容分类正交。"""
+class ConvStatus(StrEnum):
+    """对话交互状态枚举 — 与消息内容分类正交。"""
+
     NEW = "新对话"
     PENDING_REPLY = "待回复"
     REPLIED = "已回复"
@@ -25,8 +33,9 @@ class ConvStatus:
     CLOSED = "已结束"
 
 
-class MsgType:
-    """消息内容分类 — 与交互状态正交。"""
+class MsgType(StrEnum):
+    """消息内容分类枚举 — 与交互状态正交。"""
+
     NORMAL = "普通"
     REJECTION = "拒信"
     INVITATION = "邀约"

@@ -19,6 +19,7 @@ from bzauto.notify import NotificationAggregator, format_task_lines, get_notifie
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.server.tab_session import TabSession
+from bzauto.models_doc import AccountDoc
 from bzauto.storage import Storage
 from bzauto.task_runner import ScheduledTask, TaskRunner
 
@@ -26,6 +27,11 @@ log = logging.getLogger("boss.scheduler")
 
 
 def parse_cron_time(time_str: str) -> dict[str, int]:
+    """解析 HH:MM 格式时间为 APScheduler cron 参数。
+
+    :param time_str: 时间字符串，格式 "HH:MM"
+    :returns: {"hour": h, "minute": m}
+    """
     parts = time_str.split(":")
     return {"hour": int(parts[0]), "minute": int(parts[1])}
 
@@ -146,10 +152,10 @@ class BzScheduler:
     def start(self) -> None:
         cfg = get_config().schedule
 
-        self._scheduler.add_job(self._trigger_scrape, 'cron', **parse_cron_time(cfg.scrape_time))
+        self._scheduler.add_job(self._trigger_scrape, 'cron', **parse_cron_time(cfg.scrape_time))  # type: ignore[arg-type]
 
         for t in cfg.dispatch_times:
-            self._scheduler.add_job(self._trigger_dispatch, 'cron', **parse_cron_time(t))
+            self._scheduler.add_job(self._trigger_dispatch, 'cron', **parse_cron_time(t))  # type: ignore[arg-type]
 
         self._scheduler.add_job(
             self._trigger_scan, 'interval', minutes=cfg.scan_interval_minutes,
@@ -167,38 +173,35 @@ class BzScheduler:
         accounts = self._get_scraper_accounts()
         agg = NotificationAggregator(get_notifier(), f"采集报告 {datetime.date.today().isoformat()}")
         for acc in accounts:
-            task = ScrapeTask(acc["account_id"], self._storage)
+            task = ScrapeTask(acc.account_id, self._storage)
             result = await self._runner.submit_and_wait(task)
-            agg.add_section(acc["name"], format_task_lines("采集", result))
+            agg.add_section(acc.name, format_task_lines("采集", result))
         await agg.flush()
 
     async def _trigger_dispatch(self) -> None:
         accounts = self._storage.get_enabled_accounts()
         agg = NotificationAggregator(get_notifier(), f"投递报告 {datetime.datetime.now():%m-%d %H:%M}")
         for acc in accounts:
-            task = DispatchTask(acc["account_id"], self._storage, get_config().schedule.dispatch_batch_size)
+            task = DispatchTask(acc.account_id, self._storage, get_config().schedule.dispatch_batch_size)
             result = await self._runner.submit_and_wait(task)
             lines = format_task_lines("投递", result)
             if not result.get("skipped"):
-                account_data = self._storage.get_account(acc['account_id'])
-                daily_count = account_data.get('daily_count', 0) if account_data else 0
-                daily_limit = account_data.get('daily_limit', 150) if account_data else 150
-                lines.append(f"今日已投 {daily_count}/{daily_limit}")
-            agg.add_section(acc.get("name", acc["account_id"]), lines)
+                lines.append(f"今日已投 {acc.daily_count}/{acc.daily_limit}")
+            agg.add_section(acc.name or acc.account_id, lines)
         await agg.flush()
 
     async def _trigger_scan(self) -> None:
         accounts = self._storage.get_enabled_accounts()
         agg = NotificationAggregator(get_notifier(), f"消息扫描 {datetime.datetime.now():%m-%d %H:%M}")
         for acc in accounts:
-            task = ScanTask(acc["account_id"], self._storage)
+            task = ScanTask(acc.account_id, self._storage)
             result = await self._runner.submit_and_wait(task)
-            agg.add_section(acc.get("name", acc["account_id"]), format_task_lines("扫描", result))
+            agg.add_section(acc.name or acc.account_id, format_task_lines("扫描", result))
         await agg.flush()
 
-    def _get_scraper_accounts(self) -> list[dict]:
+    def _get_scraper_accounts(self) -> list[AccountDoc]:
         cfg = get_config()
         return [
-            {"account_id": a.id, "name": a.name}
+            AccountDoc(account_id=a.id, name=a.name)
             for a in cfg.accounts if a.enabled and a.role == "scraper"
         ]
