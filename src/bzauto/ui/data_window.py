@@ -8,6 +8,7 @@ from typing import Any
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
+    QApplication,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -293,6 +294,10 @@ class DataWindow(QWidget):
         account = item.data(Qt.ItemDataRole.UserRole + 1) if item else ""
 
         menu = QMenu()
+        act_copy = QAction("复制行", self)
+        act_copy.triggered.connect(lambda: self._copy_conv_row(row))
+        menu.addAction(act_copy)
+        menu.addSeparator()
         act_status = QAction("修改状态", self)
         act_status.triggered.connect(lambda: self._edit_conv_status(row, conv_id, account))
         act_note = QAction("修改备注", self)
@@ -303,6 +308,23 @@ class DataWindow(QWidget):
         menu.addAction(act_note)
         menu.addAction(act_delete)
         menu.exec(self._conv_table.viewport().mapToGlobal(pos))
+
+    def _copy_conv_row(self, row):
+        t = self._conv_table
+        cells = {i: t.item(row, i).text() if t.item(row, i) else "" for i in range(12)}
+        msg_type = classify_msg_type(cells[3], cells[4])
+        lines = [
+            f"{cells[0]} | {cells[1]} | {cells[2]}",
+            f"消息：{cells[10]} {cells[3]}",
+            f"发送方：{'对方' if cells[4]=='other' else '自己'}",
+            f"未读数量：{cells[5]}",
+            f"内容分类：{msg_type}",
+            f"平台状态：{cells[7]}",
+            f"业务状态：{cells[8]}",
+            f"账号：{cells[9]}",
+            f"备注：{cells[11]}",
+        ]
+        QApplication.clipboard().setText("\n".join(lines))
 
     def _conv_cell_double_clicked(self, row, col):
         conv_id_item = self._conv_table.item(row, 0)
