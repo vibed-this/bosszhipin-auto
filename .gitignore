@@ -221,3 +221,6 @@ __marimo__/
 
 # Node
 node_modules/
+
+# Runtime data (TinyDB database)
+data/
