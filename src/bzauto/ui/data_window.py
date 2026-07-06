@@ -77,10 +77,10 @@ class DataWindow(QWidget):
         toolbar.addWidget(self._btn_refresh)
         layout.addLayout(toolbar)
 
-        self._jobs_table = QTableWidget(0, 7)
-        self._jobs_table.setHorizontalHeaderLabels(["职位名", "公司", "薪资", "状态", "账号", "投递时间", "备注"])
+        self._jobs_table = QTableWidget(0, 8)
+        self._jobs_table.setHorizontalHeaderLabels(["职位名", "公司", "薪资", "地点", "状态", "账号", "投递时间", "备注"])
         header = self._jobs_table.horizontalHeader()
-        widths = [180, 160, 80, 80, 80, 160, 120]
+        widths = [180, 160, 80, 120, 80, 80, 160, 120]
         for i, w in enumerate(widths):
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
             self._jobs_table.setColumnWidth(i, w)
@@ -177,10 +177,12 @@ class DataWindow(QWidget):
             table.setItem(i, 0, QTableWidgetItem(j.title))
             table.setItem(i, 1, QTableWidgetItem(j.company))
             table.setItem(i, 2, QTableWidgetItem(j.salary_raw))
-            table.setItem(i, 3, QTableWidgetItem(j.status))
-            table.setItem(i, 4, QTableWidgetItem(j.account))
-            table.setItem(i, 5, QTableWidgetItem(j.applied_at.replace("T", " ")[:16] if j.applied_at else ""))
-            table.setItem(i, 6, QTableWidgetItem(j.note))
+            loc_text = "\u00B7".join(j.location)
+            table.setItem(i, 3, QTableWidgetItem(loc_text))
+            table.setItem(i, 4, QTableWidgetItem(j.status))
+            table.setItem(i, 5, QTableWidgetItem(j.account))
+            table.setItem(i, 6, QTableWidgetItem(j.applied_at.replace("T", " ")[:16] if j.applied_at else ""))
+            table.setItem(i, 7, QTableWidgetItem(j.note))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, j.job_id)
         table.setSortingEnabled(True)
         total = len(self._storage.search_jobs())
@@ -254,21 +256,21 @@ class DataWindow(QWidget):
     def _jobs_cell_double_clicked(self, row, col):
         job_id_item = self._jobs_table.item(row, 0)
         job_id = job_id_item.data(Qt.ItemDataRole.UserRole) if job_id_item else ""
-        if col == 3:
+        if col == 4:
             self._edit_job_status(row, job_id)
-        elif col == 6:
+        elif col == 7:
             self._edit_job_note(row, job_id)
 
     def _edit_job_status(self, row, job_id):
         statuses = ["已沟通", "已打招呼", "HR已读", "HR已回复", "已邀面试", "已拒绝", "已结束"]
-        current = self._jobs_table.item(row, 3).text() if self._jobs_table.item(row, 3) else ""
+        current = self._jobs_table.item(row, 4).text() if self._jobs_table.item(row, 4) else ""
         new_status, ok = QInputDialog.getItem(self, "修改状态", "新状态:", statuses, current=statuses.index(current) if current in statuses else 0)
         if ok and new_status:
             self._storage.update_job_status(job_id, new_status)
             self._refresh_jobs()
 
     def _edit_job_note(self, row, job_id):
-        current = self._jobs_table.item(row, 6).text() if self._jobs_table.item(row, 6) else ""
+        current = self._jobs_table.item(row, 7).text() if self._jobs_table.item(row, 7) else ""
         new_note, ok = QInputDialog.getText(self, "修改备注", "备注:", text=current)
         if ok:
             self._storage.update_job_note(job_id, new_note)
@@ -289,12 +291,16 @@ class DataWindow(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "导出 CSV", "jobs.csv", "CSV (*.csv)")
         if not path:
             return
-        fieldnames = ["title", "company", "salary_raw", "status", "account", "applied_at", "href", "note"]
+        fieldnames = ["title", "company", "salary_raw", "location", "status", "account", "applied_at", "href", "note"]
+
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             for j in jobs:
-                writer.writerow({k: getattr(j, k, "") for k in fieldnames})
+                row = {k: getattr(j, k, "") for k in fieldnames}
+                if isinstance(row.get("location"), list):
+                    row["location"] = "\u00B7".join(row["location"])
+                writer.writerow(row)
 
     def _conv_context_menu(self, pos):
         item = self._conv_table.itemAt(pos)

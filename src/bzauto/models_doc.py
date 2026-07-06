@@ -21,6 +21,7 @@ class JobDoc(BaseModel):
     :ivar salary_max: 解析后的最高薪资 (K)
     :ivar company: 公司名称
     :ivar href: 职位详情链接
+    :ivar location: 地点列表（如 ["长沙", "岳麓区", "望城坡"]）
     :ivar account: 关联账号 ID
     :ivar status: 业务状态文本（如 "已沟通"）
     :ivar dispatch_status: 派发状态（pending / claimed / success / failed）
@@ -39,6 +40,7 @@ class JobDoc(BaseModel):
     salary_max: int = 0
     company: str = ""
     href: str = ""
+    location: list[str] = []
     account: str = ""
     status: str = ""
     dispatch_status: str = DispatchStatus.PENDING

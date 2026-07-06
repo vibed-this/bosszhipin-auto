@@ -26,6 +26,7 @@ _JOB_TITLE = ".job-name"
 _SALARY = ".job-salary"
 _COMPANY = ".boss-name"
 _JOB_LINK = "a.job-name"
+_LOCATION = ".company-location"
 _EXPECT_TAB = "a.expect-item"
 
 _JOB_PROJECT = {
@@ -33,6 +34,7 @@ _JOB_PROJECT = {
     "salary": f"{_SALARY}@text",
     "company": f"{_COMPANY}@text",
     "href": f"{_JOB_LINK}@href",
+    "location": f"{_LOCATION}@text",
 }
 
 _DIALOG_SELECTORS = [

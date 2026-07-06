@@ -130,12 +130,14 @@ class JobCard:
     :ivar salary: 薪资原始文本
     :ivar company: 公司名称
     :ivar href: 职位详情链接
+    :ivar location: 地点原始文本（如 "长沙·岳麓区·望城坡"）
     """
 
     title: str
     salary: str
     company: str
     href: str
+    location: str = ""
 
     @classmethod
     def from_query_row(cls, row: dict[str, Any]) -> JobCard:
@@ -149,6 +151,7 @@ class JobCard:
             salary=row.get("salary") or "",
             company=row.get("company") or "",
             href=row.get("href") or "",
+            location=row.get("location") or "",
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -163,6 +166,7 @@ class JobCard:
         """
         job_id = make_job_id(self.href)
         salary_min, salary_max = parse_salary(self.salary)
+        location_parts = [p.strip() for p in self.location.split("\u00B7") if p.strip()]
         return JobDoc(
             job_id=job_id,
             title=self.title,
@@ -172,6 +176,7 @@ class JobCard:
             company=self.company,
             href=self.href,
             account=account_id,
+            location=location_parts,
         )
 
 
