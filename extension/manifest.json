@@ -5,6 +5,7 @@
   "description": "远程控制Boss直聘页面，支持JS执行、元素坐标查询",
   "minimum_chrome_version": "116",
   "permissions": [
+    "alarms",
     "storage",
     "tabs",
     "scripting"
