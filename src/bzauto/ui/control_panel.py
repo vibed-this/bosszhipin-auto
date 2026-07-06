@@ -83,6 +83,19 @@ class ControlPanel(QWidget):
 
         # Separator
         layout.addSpacing(4)
+        sep_stop = QFrame()
+        sep_stop.setFrameShape(QFrame.Shape.HLine)
+        sep_stop.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep_stop)
+
+        # Button: 停止 (Ctrl+W)
+        layout.addSpacing(2)
+        self.btn_stop = QPushButton("停止 (Ctrl+W)")
+        self.btn_stop.setFixedHeight(28)
+        layout.addWidget(self.btn_stop)
+
+        # Separator
+        layout.addSpacing(4)
         sep3 = QFrame()
         sep3.setFrameShape(QFrame.Shape.HLine)
         sep3.setFrameShadow(QFrame.Shadow.Sunken)

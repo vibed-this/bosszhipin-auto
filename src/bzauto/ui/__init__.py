@@ -49,6 +49,7 @@ class _TaskBridge(QObject):
 
     buttons_enabled = Signal(bool)
     data_updated = Signal()
+    stop_requested = Signal()                # 全局快捷键触发停止
 
     # debug 窗口信号
     debug_result = Signal(str, str, float)   # task_name, result_text, elapsed
@@ -130,16 +131,19 @@ class BzAutoApp:
         # 跨线程信号连接
         self._bridge.buttons_enabled.connect(self._control.set_buttons_enabled)
         self._bridge.data_updated.connect(self._on_data_updated)
+        self._bridge.stop_requested.connect(self._on_stop)
 
-        # 全局退出快捷键
+        # 全局快捷键
         keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
-        log.info("按 Ctrl+E 强制退出")
+        keyboard.add_hotkey("ctrl+w", lambda: self._bridge.stop_requested.emit())
+        log.info("按 Ctrl+E 强制退出 | Ctrl+W 停止任务")
 
         # 连接按钮信号
         self._control.btn_scrape_chat.clicked.connect(lambda: self._on_scrape_chat())
         self._control.btn_delete_chat.clicked.connect(lambda: self._on_delete_chat())
         self._control.btn_dump.clicked.connect(lambda: self._on_scrape_jobs())
         self._control.btn_batch.clicked.connect(lambda: self._on_batch_chat())
+        self._control.btn_stop.clicked.connect(self._on_stop)
         self._control.btn_config.clicked.connect(self._on_open_config)
         self._control.btn_data.clicked.connect(self._on_open_data)
         self._control.btn_debug.clicked.connect(self._on_open_debug)
@@ -190,6 +194,16 @@ class BzAutoApp:
 
     def _on_delete_chat(self) -> None:
         self._submit(DeleteChatTask("main", self._storage))
+
+    def _on_stop(self) -> None:
+        """停止当前任务和定时调度器。"""
+        log.info("停止信号触发")
+        if self._scheduler:
+            self._scheduler.stop()
+        if self._current_task is not None and not self._current_task.done():
+            self._current_task.cancel()
+            log.info("当前任务已取消")
+        self._bridge.buttons_enabled.emit(True)
 
     # ── 任务管理：全部走 TaskRunner 队列 ──
 
