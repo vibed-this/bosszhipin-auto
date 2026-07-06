@@ -35,6 +35,19 @@ def send_click(view: QWidget, x: int, y: int) -> None:
     QApplication.sendEvent(target, release)
 
 
+def send_mousemove(view: QWidget, x: int, y: int) -> None:
+    """在 view 的 (x, y) 发送鼠标移动事件。"""
+    target = view.focusProxy() or view
+    pos = QPointF(x, y)
+    global_pos = view.mapToGlobal(pos.toPoint()).toPointF()
+    move = QMouseEvent(
+        QEvent.Type.MouseMove, pos, global_pos,
+        Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
+    )
+    view.setFocus()
+    QApplication.sendEvent(target, move)
+
+
 def send_wheel(
     view: QWidget,
     dy: int,

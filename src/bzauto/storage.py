@@ -287,6 +287,19 @@ class Storage:
             cond &= self._ConvQ.status == status
         return [ConvDoc(**r) for r in self._conversations.search(cond)]  # type: ignore[arg-type]
 
+    def get_conversation(self, conv_id: str, account: str = "") -> ConvDoc | None:
+        """按 conv_id 查询单条对话。
+
+        :param conv_id: 对话 ID
+        :param account: 账号 ID
+        :returns: ConvDoc 或 None
+        """
+        cond = self._ConvQ.conv_id == conv_id
+        if account:
+            cond &= self._ConvQ.account == account
+        results = self._conversations.search(cond)
+        return ConvDoc(**results[0]) if results else None
+
     def search_conversations(self, keyword: str = "", status: str = "", account: str = "") -> list[ConvDoc]:
         """搜索对话记录。
 

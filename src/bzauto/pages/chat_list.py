@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 from typing import AsyncIterator
 
 from bzauto.browser.session import BrowserSession
@@ -83,24 +82,55 @@ class BossChatListPage(BasePage):
         return ChatItem.from_query_row(raw)
 
     async def iter_chat_items(
-        self, *, max_scrolls: int = 0
+        self,
+        *,
+        max_scrolls: int = 3,
+        scroll_timeout: float = 5.0,
     ) -> AsyncIterator[tuple[ChatItem, int]]:
-        index = 0
+        """全量捞取当前可见聊天项，滚动后捞取新项，按 (name, company) 去重。"""
+        seen: set[tuple[str, str]] = set()
         scroll_count = 0
 
         while True:
-            item = await self.get_chat_item_at(index)
+            items = await self.get_chat_items(limit=999, include_status=True)
 
-            if item is None:
-                if scroll_count < max_scrolls and await self.has_more():
-                    scroll_count += 1
-                    await self._session.scroll_pagedown(presses=3)
-                    await asyncio.sleep(random.uniform(0.8, 1.5))
-                    continue
+            new_found = False
+            for item in items:
+                key = (item.name, item.company)
+                if key not in seen:
+                    seen.add(key)
+                    new_found = True
+                    yield item, len(seen) - 1
+
+            if new_found:
+                scroll_count = 0
+                continue
+
+            if scroll_count >= max_scrolls:
+                log.info("已达最大滚动次数 %d", max_scrolls)
                 break
 
-            yield item, index
-            index += 1
+            scroll_count += 1
+            log.info("无新数据，尝试智能滚动 #%d...", scroll_count)
+
+            # JS 多次滚至最底部触发懒加载
+            await self._session.eval_js("""
+(function () {
+    var c = document.querySelector('.user-list-content');
+    if (!c) return;
+
+    var count = 0;
+    var scroll = function () {
+        c.scrollTop = c.scrollHeight;
+        if (count++ < 5) {
+            window.setTimeout(scroll, 300);
+        }
+    }
+    scroll();
+})()
+            """
+            )
+            await asyncio.sleep(scroll_timeout)
 
     async def is_chat_page(self) -> bool:
         url = self._session.current_url

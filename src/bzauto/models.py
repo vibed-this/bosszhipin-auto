@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import re
 from dataclasses import asdict, dataclass
@@ -53,6 +54,86 @@ def parse_salary(salary_raw: str) -> tuple[int, int]:
             salary_min = salary_max = int(m.group(1))
     return salary_min, salary_max
 
+
+def parse_chat_time(time_text: str) -> str:
+    """将 Boss 直聘聊天列表的时间文本转为 ISO 格式。
+
+    "HH:MM" → 当天
+    "MM月DD日" → 今年
+    "昨天" → 昨天
+    "周X" → 最近一周内
+    "X分钟前"/"X小时前" → 相对时间
+    "刚刚" → 当前时间
+    已有 ISO 格式 → 原样返回
+    """
+    if not time_text:
+        return ""
+    t = time_text.strip()
+
+    # 已是 ISO 格式
+    if re.match(r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}', t):
+        return t
+
+    now = datetime.datetime.now()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # HH:MM
+    m = re.match(r'^(\d{2}):(\d{2})$', t)
+    if m:
+        dt = today.replace(hour=int(m.group(1)), minute=int(m.group(2)))
+        return dt.isoformat()
+
+    # 昨天
+    if "昨天" in t:
+        m = re.search(r'(\d{2}):(\d{2})', t)
+        if m:
+            dt = (today - datetime.timedelta(days=1)).replace(hour=int(m.group(1)), minute=int(m.group(2)))
+        else:
+            dt = today - datetime.timedelta(days=1)
+        return dt.isoformat()
+
+    # 周X（中文星期几）
+    weekday_map = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+    for c in t:
+        if c in weekday_map:
+            target_wday = weekday_map[c]
+            days_ago = (now.weekday() - target_wday) % 7
+            if days_ago == 0:
+                days_ago = 7
+            m = re.search(r'(\d{2}):(\d{2})', t)
+            if m:
+                dt = (today - datetime.timedelta(days=days_ago)).replace(hour=int(m.group(1)), minute=int(m.group(2)))
+            else:
+                dt = today - datetime.timedelta(days=days_ago)
+            return dt.isoformat()
+
+    # MM月DD日
+    m = re.match(r'^(\d{1,2})月(\d{1,2})日', t)
+    if m:
+        month, day = int(m.group(1)), int(m.group(2))
+        year = now.year
+        dt = today.replace(month=month, day=day)
+        if dt > now:
+            dt = dt.replace(year=year - 1)
+        return dt.isoformat()
+
+    # X分钟前
+    m = re.match(r'^(\d+)分钟前', t)
+    if m:
+        dt = now - datetime.timedelta(minutes=int(m.group(1)))
+        return dt.isoformat()
+
+    # X小时前
+    m = re.match(r'^(\d+)小时前', t)
+    if m:
+        dt = now - datetime.timedelta(hours=int(m.group(1)))
+        return dt.isoformat()
+
+    # 刚刚
+    if "刚刚" in t:
+        return now.isoformat()
+
+    return t
 
 
 @dataclass(frozen=True)
@@ -178,7 +259,7 @@ class ChatItem:
             company=self.company,
             position=self.position,
             last_msg=self.lastMsg,
-            last_msg_time=self.time,
+            last_msg_time=parse_chat_time(self.time),
             platform_status=self.status,
             sender=self.sender,
             unread_count=self.unread_count,

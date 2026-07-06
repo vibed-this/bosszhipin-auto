@@ -174,6 +174,14 @@ class BrowserSession:
         await self.activate()
         events.send_click(view, x, y)
 
+    async def mouse_move(self, x: int, y: int) -> None:
+        """在 (x,y) 逻辑像素位置发送鼠标移动。"""
+        view = self._manager.get_view(self._account_id)
+        if not view:
+            raise RuntimeError(f"账号 {self._account_id} 没有视图")
+        await self.activate()
+        events.send_mousemove(view, x, y)
+
     async def scroll_wheel(self, dy: int, *,
                            at_x: int | None = None,
                            at_y: int | None = None,

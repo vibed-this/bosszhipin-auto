@@ -123,7 +123,7 @@ class DataWindow(QWidget):
         self._conv_table = QTableWidget(0, 12)
         self._conv_table.setHorizontalHeaderLabels([
             "招聘者", "公司", "职位", "最后消息", "发送方", "未读数", "内容分类",
-            "平台状态", "业务状态", "账号", "时间", "备注",
+            "平台状态", "业务状态", "账号", "回复时间", "备注",
         ])
         header = self._conv_table.horizontalHeader()
         widths = [80, 120, 100, 250, 60, 60, 80, 80, 80, 100, 140, 120]
@@ -217,7 +217,7 @@ class DataWindow(QWidget):
             table.setItem(i, 7, QTableWidgetItem(c.platform_status))
             table.setItem(i, 8, QTableWidgetItem(c.status))
             table.setItem(i, 9, QTableWidgetItem(c.account))
-            table.setItem(i, 10, QTableWidgetItem(c.last_updated.replace("T", " ")[:16] if c.last_updated else ""))
+            table.setItem(i, 10, QTableWidgetItem(c.last_msg_time.replace("T", " ")[:16] if c.last_msg_time else ""))
             table.setItem(i, 11, QTableWidgetItem(c.note))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, c.conv_id)
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole + 1, c.account)
@@ -321,7 +321,8 @@ class DataWindow(QWidget):
         msg_type = classify_msg_type(cells[3], sender_raw)
         lines = [
             f"{cells[0]} | {cells[1]} | {cells[2]}",
-            f"消息：{cells[10]} {cells[3]}",
+            f"回复时间：{cells[10]}",
+            f"消息：{cells[3]}",
             f"发送方：{'对方' if cells[4]=='other' else '自己'}",
             f"未读数量：{cells[5]}",
             f"内容分类：{msg_type}",
