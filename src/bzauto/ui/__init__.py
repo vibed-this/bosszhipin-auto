@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication
 from bzauto.browser import BrowserManager, get_browser_manager
 from bzauto.browser.manager import _set_browser_manager
 from bzauto.config import get_config
-from bzauto.notify import format_task_lines, get_notifier
+from bzauto.notify import get_notifier
 from bzauto.storage import Storage
 from bzauto.task_runner import ScheduledTask, TaskRunner
 from bzauto.scheduler import (
@@ -266,7 +266,7 @@ class BzAutoApp:
             while self._task_runner is None:
                 await asyncio.sleep(0.05)
             result = await self._task_runner.submit_and_wait(task)
-            lines = format_task_lines(task.name, result)
+            lines = task.format_result(result)
             if lines:
                 await get_notifier().send(
                     f"{task.name}完成 {datetime.datetime.now():%m-%d %H:%M}",
@@ -373,7 +373,7 @@ class BzAutoApp:
                 self._task_runner.submit_and_wait(task), timeout=timeout)
 
             elapsed = time.monotonic() - start
-            lines = format_task_lines(task.name, result)
+            lines = task.format_result(result)
             text = f"result = {result}\n\n通知预览:\n" + "\n".join(lines) if lines else f"result = {result}"
             if lines:
                 await get_notifier().send(

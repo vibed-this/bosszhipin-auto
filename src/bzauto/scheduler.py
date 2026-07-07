@@ -19,7 +19,7 @@ from bzauto.flows.dispatch import DispatchFlow
 from bzauto.flows.scan import ChatScanFlow
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.flows.scrape_scheduled import BossScrapeScheduledFlow
-from bzauto.notify import NotificationAggregator, format_task_lines, get_notifier
+from bzauto.notify import NotificationAggregator, get_notifier
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.models_doc import AccountDoc, RunDoc
@@ -59,6 +59,9 @@ class ScrapeTask(ScheduledTask):
         flow = BossScrapeScheduledFlow(page, session, self._account_id, self._storage)
         return await flow.run()
 
+    def format_result(self, result: dict[str, Any]) -> list[str]:
+        return [f"采集 {result.get('scraped', 0)} 个"]
+
 
 class ScrapeManualTask(ScheduledTask):
     name = "采集"
@@ -75,6 +78,9 @@ class ScrapeManualTask(ScheduledTask):
         flow = BossScrapeManualFlow(page, session, self._account_id, self._storage)
         jobs = await flow.run(max_scrolls=50, max_jobs=999)
         return {"scraped": len(jobs), "skipped": False}
+
+    def format_result(self, result: dict[str, Any]) -> list[str]:
+        return [f"采集 {result.get('scraped', 0)} 个"]
 
 
 class DispatchTask(ScheduledTask):
@@ -100,6 +106,13 @@ class DispatchTask(ScheduledTask):
         result = await flow.run(batch_size=min(remaining, self._batch_size))
         return result
 
+    def format_result(self, result: dict[str, Any]) -> list[str]:
+        if result.get("skipped"):
+            return [f"跳过: {result['skipped']}"]
+        success = result.get("success", 0)
+        failed = result.get("failed", 0)
+        return [f"投递 {success + failed} 个 (成功 {success}, 失败 {failed})"]
+
 
 class ScrapeChatTask(ScheduledTask):
     name = "消息扫描"
@@ -114,6 +127,20 @@ class ScrapeChatTask(ScheduledTask):
         page = BossChatListPage(session)
         flow = BossScrapeChatFlow(page, session, self._account_id, self._storage)
         return await flow.run()
+
+    def format_result(self, result: dict[str, Any]) -> list[str]:
+        lines = []
+        if result.get("new"):
+            lines.append(f"新对话 {result['new']} 条")
+        if result.get("deleted"):
+            lines.append(f"删拒 {result['deleted']} 条")
+        if result.get("updated"):
+            lines.append(f"更新 {result['updated']} 条")
+        for r in result.get("rejections", [])[:5]:
+            lines.append(f"  {r}")
+        if result.get("unread"):
+            lines.append(f"未读 {len(result['unread'])} 条")
+        return lines or ["已完成"]
 
 
 class DeleteChatTask(ScheduledTask):
@@ -130,6 +157,8 @@ class DeleteChatTask(ScheduledTask):
         flow = BossDeleteChatFlow(page, session, self._account_id, self._storage)
         return {"deleted": len(await flow.run(dry_run=False))}
 
+    def format_result(self, result: dict[str, Any]) -> list[str]:
+        return [f"删除 {result.get('deleted', 0)} 条"]
 
 
 class BzScheduler:
@@ -306,7 +335,7 @@ class BzScheduler:
         for acc in accounts:
             task = DispatchTask(acc.account_id, self._storage, get_config().schedule.dispatch_batch_size)
             result = await self._run_and_record("投递", acc, task)
-            lines = format_task_lines("投递", result)
+            lines = task.format_result(result)
             if not result.get("skipped"):
                 lines.append(f"今日已投 {acc.daily_count}/{acc.daily_limit}")
             agg.add_section(acc.name or acc.account_id, lines)
@@ -318,7 +347,7 @@ class BzScheduler:
         for acc in accounts:
             task = ScrapeTask(acc.account_id, self._storage)
             result = await self._run_and_record("采集", acc, task)
-            agg.add_section(acc.name or acc.account_id, format_task_lines("采集", result))
+            agg.add_section(acc.name or acc.account_id, task.format_result(result))
         await agg.flush()
 
     async def _trigger_scrape_chat(self) -> None:
@@ -327,7 +356,7 @@ class BzScheduler:
         for acc in accounts:
             task = ScrapeChatTask(acc.account_id, self._storage)
             result = await self._run_and_record("消息扫描", acc, task)
-            agg.add_section(acc.name or acc.account_id, format_task_lines("消息扫描", result))
+            agg.add_section(acc.name or acc.account_id, task.format_result(result))
         await agg.flush()
 
     async def _trigger_delete_chat(self) -> None:
@@ -336,7 +365,7 @@ class BzScheduler:
         for acc in accounts:
             task = DeleteChatTask(acc.account_id, self._storage)
             result = await self._run_and_record("消息删拒", acc, task)
-            agg.add_section(acc.name or acc.account_id, format_task_lines("消息删拒", result))
+            agg.add_section(acc.name or acc.account_id, task.format_result(result))
         await agg.flush()
 
 

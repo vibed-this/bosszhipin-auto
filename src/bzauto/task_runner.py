@@ -15,6 +15,10 @@ class ScheduledTask:
     async def execute(self) -> dict[str, Any]:
         raise NotImplementedError
 
+    def format_result(self, result: dict[str, Any]) -> list[str]:
+        """将 execute() 返回值格式化为通知行列表。"""
+        raise NotImplementedError
+
 
 class TaskRunner:
     """串行任务队列，挂在现有后台 asyncio event loop 上。"""

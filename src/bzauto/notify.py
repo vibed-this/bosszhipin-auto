@@ -2,51 +2,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Protocol
+from typing import Protocol
 
 import httpx
 
 from bzauto.config import get_config
 
 log = logging.getLogger("boss.notify")
-
-
-def format_task_lines(task_name: str, result: dict[str, Any] | list) -> list[str]:
-    """将任务结果格式化为通知行列表。scheduler 和 UI 共用。"""
-    if task_name == "采集":
-        return [f"采集 {result.get('scraped', 0)} 个"]
-
-    if task_name == "投递":
-        if result.get("skipped"):
-            return [f"跳过: {result['skipped']}"]
-        success = result.get("success", 0)
-        failed = result.get("failed", 0)
-        return [f"投递 {success + failed} 个 (成功 {success}, 失败 {failed})"]
-
-    if task_name in ("扫描", "聊天爬取", "消息扫描"):
-        items = result if isinstance(result, dict) else {}
-        lines = []
-        new_conv = items.get("new", 0)
-        if new_conv:
-            lines.append(f"新对话 {new_conv} 条")
-        deleted = items.get("deleted", 0)
-        if deleted:
-            lines.append(f"删拒 {deleted} 条")
-        updated = items.get("updated", 0)
-        if updated:
-            lines.append(f"更新 {updated} 条")
-        for r in items.get("rejections", [])[:5]:
-            lines.append(f"  {r}")
-        unread = items.get("unread", [])
-        if unread:
-            lines.append(f"未读 {len(unread)} 条")
-        return lines or ["已完成"]
-
-    if task_name in ("删拒", "消息删拒"):
-        n = result.get("deleted", 0) if isinstance(result, dict) else len(result) if isinstance(result, list) else 0
-        return [f"删除 {n} 条"]
-
-    return [f"已完成"]
 
 
 class Notifier(Protocol):
