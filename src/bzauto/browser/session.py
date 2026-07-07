@@ -171,7 +171,6 @@ class BrowserSession:
         view = self._manager.get_view(self._account_id)
         if not view:
             raise RuntimeError(f"账号 {self._account_id} 没有视图")
-        await self.activate()
         events.send_click(view, x, y)
 
     async def mouse_move(self, x: int, y: int) -> None:
@@ -179,7 +178,6 @@ class BrowserSession:
         view = self._manager.get_view(self._account_id)
         if not view:
             raise RuntimeError(f"账号 {self._account_id} 没有视图")
-        await self.activate()
         events.send_mousemove(view, x, y)
 
     async def scroll_wheel(self, dy: int, *,
@@ -192,10 +190,9 @@ class BrowserSession:
         events.send_wheel(view, dy, at_x=at_x, at_y=at_y, presses=presses)
 
     async def scroll_pagedown(self, *,
-                              at_x: int | None = None,
-                              at_y: int | None = None,
-                              presses: int = 3) -> None:
-        await self.activate()
+                               at_x: int | None = None,
+                               at_y: int | None = None,
+                               presses: int = 3) -> None:
         view = self._manager.get_view(self._account_id)
         if not view:
             raise RuntimeError(f"账号 {self._account_id} 没有视图")

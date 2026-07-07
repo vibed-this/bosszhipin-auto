@@ -29,7 +29,6 @@ def send_click(view: QWidget, x: int, y: int) -> None:
         Qt.MouseButton.LeftButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
     )
 
-    view.setFocus()
     QApplication.sendEvent(target, move)
     QApplication.sendEvent(target, press)
     QApplication.sendEvent(target, release)
@@ -44,7 +43,6 @@ def send_mousemove(view: QWidget, x: int, y: int) -> None:
         QEvent.Type.MouseMove, pos, global_pos,
         Qt.MouseButton.NoButton, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
     )
-    view.setFocus()
     QApplication.sendEvent(target, move)
 
 
