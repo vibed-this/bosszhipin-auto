@@ -67,21 +67,11 @@ class DispatchTask(ScheduledTask):
 
     async def execute(self) -> dict[str, Any]:
         cfg = get_config()
-        self._storage.release_stale_claims(cfg.schedule.claim_timeout_minutes)
+        sched_cfg = cfg.schedule
+        self._storage.release_stale_claims(sched_cfg.claim_timeout_minutes)
         remaining = self._storage.get_remaining_quota(self._account_id)
         if remaining <= 0:
             return {"skipped": "配额已满", "success": 0, "failed": 0}
-
-        pending_count = self._storage.count_pending_jobs()
-        account_cfg = None
-        for a in cfg.accounts:
-            if a.id == self._account_id:
-                account_cfg = a
-                break
-        is_scraper = account_cfg and account_cfg.role == "scraper"
-
-        if pending_count < self._batch_size and is_scraper:
-            await ScrapeTask(self._account_id, self._storage).execute()
 
         bm = get_browser_manager()
         session = bm.get_session(self._account_id)
@@ -146,13 +136,6 @@ class BzScheduler:
     def start(self) -> None:
         cfg = get_config().schedule
 
-        if cfg.scrape_interval_minutes > 0:
-            self._scheduler.add_job(
-                self._trigger_scrape, 'interval', minutes=cfg.scrape_interval_minutes,
-            )
-        else:
-            self._scheduler.add_job(self._trigger_scrape, 'cron', **parse_cron_time(cfg.scrape_time))  # type: ignore[arg-type]
-
         for t in cfg.dispatch_times:
             self._scheduler.add_job(self._trigger_dispatch, 'cron', **parse_cron_time(t))  # type: ignore[arg-type]
 
@@ -171,7 +154,6 @@ class BzScheduler:
             log.info("调度器已处于停止状态")
 
     _JOB_LABEL_MAP: dict[str, str] = {
-        "_trigger_scrape": "采集",
         "_trigger_dispatch": "投递",
         "_trigger_scan": "扫描",
     }
@@ -239,16 +221,6 @@ class BzScheduler:
                 error=error,
             ))
 
-    async def _trigger_scrape(self) -> None:
-        cfg = get_config()
-        accounts = self._get_scraper_accounts()
-        agg = NotificationAggregator(get_notifier(), f"采集报告 {datetime.date.today().isoformat()}")
-        for acc in accounts:
-            task = ScrapeTask(acc.account_id, self._storage)
-            result = await self._run_and_record("采集", acc, task)
-            agg.add_section(acc.name, format_task_lines("采集", result))
-        await agg.flush()
-
     async def _trigger_dispatch(self) -> None:
         accounts = self._storage.get_enabled_accounts()
         agg = NotificationAggregator(get_notifier(), f"投递报告 {datetime.datetime.now():%m-%d %H:%M}")
@@ -270,9 +242,4 @@ class BzScheduler:
             agg.add_section(acc.name or acc.account_id, format_task_lines("扫描", result))
         await agg.flush()
 
-    def _get_scraper_accounts(self) -> list[AccountDoc]:
-        cfg = get_config()
-        return [
-            AccountDoc(account_id=a.id, name=a.name)
-            for a in cfg.accounts if a.enabled and a.role == "scraper"
-        ]
+
