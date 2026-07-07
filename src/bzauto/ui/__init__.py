@@ -78,8 +78,8 @@ class BzAutoApp:
         )
         _set_browser_manager(self._manager)
 
-        self._control = ControlPanel()
-        self._log_win = LogWindow()
+        self._control = ControlPanel(self._manager)
+        self._log_win = LogWindow(self._manager)
         self._data_win: DataWindow | None = None
         self._schedule_win: ScheduleWindow | None = None
         self._account_win: AccountWindow | None = None
@@ -140,6 +140,17 @@ class BzAutoApp:
         self._control.btn_account.clicked.connect(self._on_open_account)
         self._control.btn_schedule.clicked.connect(self._on_open_schedule)
         self._control.btn_debug.clicked.connect(self._on_open_debug)
+
+        # 控制台/日志窗口随浏览器窗口最小化/恢复
+        self._manager.windowStateChanged.connect(self._on_manager_window_state_changed)
+
+    def _on_manager_window_state_changed(self, state: Qt.WindowState) -> None:
+        if state & Qt.WindowState.WindowMinimized:
+            self._control.showMinimized()
+            self._log_win.showMinimized()
+        else:
+            self._control.showNormal()
+            self._log_win.showNormal()
 
     async def _async_stop(self) -> None:
         """协程版停止（被 keyboard 线程调用）。"""
