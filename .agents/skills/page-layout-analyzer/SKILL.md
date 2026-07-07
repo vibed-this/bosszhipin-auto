@@ -7,15 +7,25 @@ description: Analyze QWebEngineView page DOM structure to find scrollable contai
 
 Analyze a Boss直聘 (or any QWebEngineView) page's DOM structure to determine scrollable containers, element selectors, and interaction strategies. Uses `BrowserManager` + `eval_js` to inspect the live DOM.
 
-## Analysis workflow
+## Workflow（全自动，agent 独立完成）
 
-### 1. Write a temp script to probe DOM
+Agent 应按以下流程自动执行，无需用户介入：
+
+1. **写脚本** — 在项目根目录创建 `probe_<topic>.py`（模板见下方）
+2. **运行脚本** — `uv run python probe_<topic>.py`，捕获 stdout/stderr
+3. **分析结果** — 根据 JS probe 返回的数据判断滚动策略
+4. **迭代** — 基于前一轮结果，修改 JS probe 再运行
+5. **清理** — 确定方案后删除临时 probe 脚本
+6. **实施** — 修改 `pages/` 或 `flows/` 中的正式代码
+
+## Probe 脚本模板
 
 ```python
-"""dump_<page>.py — 页面布局探查"""
+"""probe_<topic>.py — 页面布局探查"""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 
@@ -26,9 +36,13 @@ from bzauto.browser import BrowserManager
 from bzauto.browser.manager import _set_browser_manager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("dump")
+log = logging.getLogger("probe")
 
 accounts = [{"id": "main", "name": "main"}]
+
+PROBES = {
+    "name": """JS表达式或IIFE，返回JSON.stringify可序列化的值""",
+}
 
 async def main():
     bm = BrowserManager(accounts)
@@ -36,11 +50,19 @@ async def main():
     bm.show()
 
     session = bm.get_session("main")
-    await session.ensure_tab("https://www.zhipin.com/web/geek/chat", timeout=60)
+    await session.ensure_tab("<url>", timeout=60)
     await session.activate()
     await asyncio.sleep(5)
 
-    # ... JS probes here ...
+    for name, js in PROBES.items():
+        log.info("=" * 60)
+        log.info("Running probe: %s", name)
+        try:
+            result = await session.eval_js(js, timeout=15)
+            log.info("Result:\n%s", json.dumps(result, ensure_ascii=False, indent=2))
+        except Exception as e:
+            log.error("Probe %s failed: %s", name, e)
+        await asyncio.sleep(2)
 
     await asyncio.sleep(2)
     bm.close()

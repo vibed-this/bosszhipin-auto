@@ -194,8 +194,36 @@ JSON.stringify((function() {
     async def click_chat_item(self, unique_id: str) -> None:
         """通过 uniqueId 定位并点击聊天项。
 
+        先通过 dataSources 找到索引，用虚拟滚动组件 scrollToIndex 滚动到该位置，
+        等待渲染后从 DOM 中查找并点击。
+
         :param unique_id: Vue 侧的 uniqueId（{uid}-{friendSource}）
         """
+        idx_raw = await self._session.eval_js(f"""
+JSON.stringify((function() {{
+    var uid = {json.dumps(unique_id)};
+    var el = document.querySelector('.user-list-content');
+    if (!el || !el.__vue__) return null;
+    var ds = el.__vue__.$props && el.__vue__.$props.dataSources;
+    if (!Array.isArray(ds)) return null;
+    for (var i = 0; i < ds.length; i++) {{
+        if (ds[i].uniqueId === uid) {{
+            if (typeof el.__vue__.scrollToIndex === 'function') {{
+                el.__vue__.scrollToIndex(i);
+            }} else {{
+                var avgH = el.scrollHeight / ds.length;
+                el.scrollTop = i * avgH;
+            }}
+            return {{index: i}};
+        }}
+    }}
+    return null;
+}})())
+        """)
+        if not idx_raw:
+            raise ElementNotFound(f"uniqueId={unique_id} not in dataSources")
+        await asyncio.sleep(1.0)
+
         bbox_raw = await self._session.eval_js(f"""
 JSON.stringify((function() {{
     var uid = {json.dumps(unique_id)};
