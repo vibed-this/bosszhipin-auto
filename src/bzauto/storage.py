@@ -262,11 +262,11 @@ class Storage:
 
     # ── Conversations ──
 
-    def upsert_conversation(self, doc: ConvDoc) -> bool:
+    def upsert_conversation(self, doc: ConvDoc) -> bool | None:
         """插入或更新一条对话记录。
 
         :param doc: 对话文档
-        :returns: True 表示新建，False 表示更新
+        :returns: True 表示新建，False 表示更新（数据发生实质变化），None 表示无变化
         """
         cid = doc.conv_id or make_conv_id(doc.account, doc.name, doc.company)
         existing = self._conversations.get(
@@ -276,6 +276,16 @@ class Storage:
         if existing:
             update_data = doc.model_dump(exclude={"conv_id", "account"}, exclude_none=True)
             update_data = {k: v for k, v in update_data.items() if v != ""}
+
+            # 只跟踪页面可感知的字段，跳过 status/linked_job_id/note 等由其他流程维护的字段
+            tracked_keys = {"last_msg", "last_msg_time", "platform_status", "sender", "unread_count", "position"}
+            has_changes = any(
+                key in update_data and str(update_data[key]) != str(existing.get(key, ""))
+                for key in tracked_keys
+            )
+            if not has_changes:
+                return None
+
             update_data["last_updated"] = now
             self._conversations.update(
                 update_data,

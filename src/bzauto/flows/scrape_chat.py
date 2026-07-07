@@ -71,10 +71,10 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
                 existing = storage.get_conversation(conv_id, self._account_id)
                 old_status = existing.status or ConvStatus.NONE if existing else ConvStatus.NONE
 
-                is_new = storage.upsert_conversation(conv_doc)
-                if is_new:
+                result = storage.upsert_conversation(conv_doc)
+                if result is True:
                     new_count += 1
-                else:
+                elif result is False:
                     updated_count += 1
 
                 status = infer_status(item.sender, item.unread_count, old_status, conv_doc.last_msg_time)
