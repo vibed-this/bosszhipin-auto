@@ -169,6 +169,21 @@ class BossJobListPage(BasePage):
                 await asyncio.sleep(0.5)
             if "今日已投递" in text or "150" in text or "消息已满" in text or "明日再试" in text:
                 return False
+
+        greet = await self._session.find_all(
+            select=".dialog-wrap.greet-pop .dialog-con p",
+            project={"text": "@text"},
+        )
+        if greet:
+            text = greet[0].get("text", "")
+            log.info("  温馨提示弹窗: %s", text)
+            btn = await self._session.bbox(select=".dialog-wrap.greet-pop .btn.btn-sure")
+            if btn and btn.get("cx", 0) > 0:
+                await self._session.click(int(btn["cx"]), int(btn["cy"]))
+                await asyncio.sleep(2.0)
+            if "今日" in text or "已累计" in text or "150" in text:
+                return False
+
         return True
 
     async def find_card_by_href(self, href: str) -> int:
