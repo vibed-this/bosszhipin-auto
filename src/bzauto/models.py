@@ -313,7 +313,12 @@ class ChatItem:
         )
 
 
-_REJECTION_KWS = ["抱歉", "不好意思", "对不起", "不合适", "不太合适", "不适合", "不太适合" , "荣幸", "遗憾", "不太匹配", "谢谢", "祝"]
+_REJECTION_KWS: list[str | re.Pattern] = [
+    "抱歉", "不好意思", "对不起", "不合适", "不适合",
+    "荣幸", "遗憾", "谢谢", "祝",
+    "感谢",
+    re.compile(r"不.?匹配"),
+]
 _INVITE_RESUME_KWS = ["方便", "发", "附件"]
 _INVITE_INTERVIEW_KWS = ["时间", "什么时候"]
 
@@ -361,8 +366,12 @@ def classify_msg_type(last_msg: str, sender: str, platform_status: str = "") -> 
             return MsgType.REJECTION
         return MsgType.NORMAL
 
-    if any(kw in last_msg for kw in _REJECTION_KWS):
-        return MsgType.REJECTION
+    for kw in _REJECTION_KWS:
+        if isinstance(kw, re.Pattern):
+            if kw.search(last_msg):
+                return MsgType.REJECTION
+        elif kw in last_msg:
+            return MsgType.REJECTION
 
     if any(kw in last_msg for kw in _INVITE_INTERVIEW_KWS):
         return MsgType.INVITE_INTERVIEW
