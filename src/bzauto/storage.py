@@ -18,7 +18,7 @@ from sqlite_utils.db import NotFoundError
 
 from bzauto.config import get_config
 from bzauto.enums import ConvStatus, DispatchStatus
-from bzauto.models import infer_status, make_conv_id, make_job_id
+from bzauto.models import make_conv_id, make_job_id
 from bzauto.models_doc import AccountDoc, ConvDoc, JobDoc, RunDoc
 
 log = logging.getLogger("boss.storage")
@@ -220,16 +220,18 @@ class ConversationRepo:
             data["conv_id"] = cid
             data.setdefault("first_seen_at", now)
             data.setdefault("last_updated", now)
-            self.tbl.insert(data, pk=("conv_id", "account"))
+            self.tbl.insert(data, pk=("conv_id", "account"))  # type: ignore[arg-type]
             return True
 
     def batch_upsert(self, account_id: str, items: list[Any]) -> tuple[int, int]:
-        from bzauto.models import ChatItem, infer_status
+        from bzauto.models import infer_status
         new_count = updated_count = 0
         now = _now_iso()
         tracked_keys = {"last_msg", "last_msg_time", "platform_status", "sender", "unread_count", "position"}
 
-        with self.db.conn:
+        conn = self.db.conn
+        assert conn is not None
+        with conn:
             for item in items:
                 doc = item.to_doc(account_id)
                 cid = doc.conv_id
@@ -248,7 +250,7 @@ class ConversationRepo:
                     new_status = infer_status(item.sender, item.unread_count, old_status, doc.last_msg_time)
                     data["status"] = new_status
                     data["status_changed_at"] = now
-                    self.tbl.insert(data, pk=("conv_id", "account"))
+                    self.tbl.insert(data, pk=("conv_id", "account"))  # type: ignore[arg-type]
                     new_count += 1
                 else:
                     old = ConvDoc(**existing)
@@ -494,7 +496,7 @@ class MetaRepo:
     def set(self, key: str, value: Any) -> None:
         self.tbl.upsert(
             {"key": key, "value": json.dumps(value, ensure_ascii=False)},
-            pk="key",
+            pk="key",  # type: ignore[arg-type]
         )
 
 
@@ -513,7 +515,7 @@ class SeenHrefsRepo:
         count = 0
         for href in hrefs:
             try:
-                self.tbl.insert({"href": href}, pk="href", ignore=True)
+                self.tbl.insert({"href": href}, pk="href", ignore=True)  # type: ignore[arg-type]
                 count += 1
             except Exception:
                 pass
@@ -656,7 +658,9 @@ class Storage:
     @contextmanager
     def transaction(self) -> Iterator[None]:
         """显式事务上下文。异常时自动回滚。"""
-        with self.db.conn:
+        conn = self.db.conn
+        assert conn is not None
+        with conn:
             yield
 
 
