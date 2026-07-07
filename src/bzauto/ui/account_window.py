@@ -84,7 +84,7 @@ class AccountWindow(QWidget):
 
         self._table = QTableWidget(0, 5)
         self._table.setHorizontalHeaderLabels([
-            "ID", "名称", "角色", "今日进度", "启用",
+            "ID", "名称", "角色", "今日已投 / 上限", "启用",
         ])
         header = self._table.horizontalHeader()
         widths = [120, 140, 100, 80, 60]
@@ -112,9 +112,10 @@ class AccountWindow(QWidget):
             table.setItem(i, 1, QTableWidgetItem(acc.name))
             table.setItem(i, 2, QTableWidgetItem(acc.role))
 
-            remaining = self._storage.get_remaining_quota(acc.id)
-            daily_count = 150 - remaining
-            table.setItem(i, 3, QTableWidgetItem(str(daily_count)))
+            doc = self._storage.get_account(acc.id)
+            dc = doc.daily_count if doc else 0
+            dl = doc.daily_limit if doc else 150
+            table.setItem(i, 3, QTableWidgetItem(f"{dc} / {dl}"))
 
             enabled_item = QTableWidgetItem("是" if acc.enabled else "否")
             table.setItem(i, 4, enabled_item)

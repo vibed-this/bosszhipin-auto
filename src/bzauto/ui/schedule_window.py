@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from bzauto.config import get_config
 from bzauto.storage import Storage
 
 if TYPE_CHECKING:
@@ -91,19 +90,7 @@ class ScheduleWindow(QWidget):
 
         layout.addWidget(task_box)
 
-        # ── 3. 账号配额表 ──
-        quota_box = QGroupBox("账号配额")
-        quota_layout = QVBoxLayout(quota_box)
-        self._quota_table = QTableWidget(0, 4)
-        self._quota_table.setHorizontalHeaderLabels(["名称", "角色", "今日已投 / 上限", "启用"])
-        q_header = self._quota_table.horizontalHeader()
-        q_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self._quota_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self._quota_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        quota_layout.addWidget(self._quota_table)
-        layout.addWidget(quota_box)
-
-        # ── 4. 积压与维护状态 ──
+        # ── 3. 积压与维护状态 ──
         backlog_box = QGroupBox("积压与维护状态")
         backlog_layout = QHBoxLayout(backlog_box)
         self._lbl_pending = QLabel("待处理投递: —")
@@ -170,7 +157,6 @@ class ScheduleWindow(QWidget):
     def _refresh_all(self) -> None:
         self._refresh_overview()
         self._refresh_task_table()
-        self._refresh_quota_table()
         self._refresh_backlog()
         self._refresh_recent_runs()
         self._update_countdown()
@@ -243,20 +229,6 @@ class ScheduleWindow(QWidget):
                     item.setText(f"{minutes} 分 {seconds} 秒后")
                 else:
                     item.setText(f"{seconds} 秒后")
-
-    def _refresh_quota_table(self) -> None:
-        table = self._quota_table
-        table.setRowCount(0)
-        cfg = get_config()
-        accounts = self._storage.get_enabled_accounts()
-        table.setRowCount(len(accounts))
-        for i, acc in enumerate(accounts):
-            role = "采集" if acc.role == "scraper" else "投递"
-            enabled = "✓" if acc.enabled else "✗"
-            table.setItem(i, 0, QTableWidgetItem(acc.name or acc.account_id))
-            table.setItem(i, 1, QTableWidgetItem(role))
-            table.setItem(i, 2, QTableWidgetItem(f"{acc.daily_count} / {acc.daily_limit}"))
-            table.setItem(i, 3, QTableWidgetItem(enabled))
 
     def _refresh_backlog(self) -> None:
         self._lbl_pending.setText(f"待处理投递: {self._storage.count_pending_jobs()}")
