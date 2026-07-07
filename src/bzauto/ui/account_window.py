@@ -82,12 +82,12 @@ class AccountWindow(QWidget):
         toolbar.addWidget(self._status_label)
         layout.addLayout(toolbar)
 
-        self._table = QTableWidget(0, 6)
+        self._table = QTableWidget(0, 5)
         self._table.setHorizontalHeaderLabels([
-            "ID", "名称", "角色", "每日上限", "今日进度", "启用",
+            "ID", "名称", "角色", "今日进度", "启用",
         ])
         header = self._table.horizontalHeader()
-        widths = [120, 140, 100, 80, 80, 60]
+        widths = [120, 140, 100, 80, 60]
         for i, w in enumerate(widths):
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
             self._table.setColumnWidth(i, w)
@@ -112,19 +112,16 @@ class AccountWindow(QWidget):
             table.setItem(i, 1, QTableWidgetItem(acc.name))
             table.setItem(i, 2, QTableWidgetItem(acc.role))
 
-            limit_item = QTableWidgetItem(str(acc.daily_limit))
-            table.setItem(i, 3, limit_item)
-
             remaining = self._storage.get_remaining_quota(acc.id)
-            daily_count = acc.daily_limit - remaining if remaining is not None else 0
-            table.setItem(i, 4, QTableWidgetItem(str(daily_count)))
+            daily_count = 150 - remaining
+            table.setItem(i, 3, QTableWidgetItem(str(daily_count)))
 
             enabled_item = QTableWidgetItem("是" if acc.enabled else "否")
-            table.setItem(i, 5, enabled_item)
+            table.setItem(i, 4, enabled_item)
 
             if not acc.enabled:
                 gray = Qt.GlobalColor.gray
-                for col in range(6):
+                for col in range(5):
                     item = table.item(i, col)
                     if item:
                         item.setForeground(gray)
@@ -150,11 +147,9 @@ class AccountWindow(QWidget):
         edit_id = QLineEdit()
         edit_name = QLineEdit()
         edit_role = QLineEdit("dispatcher")
-        edit_limit = QLineEdit("150")
         form.addRow("ID", edit_id)
         form.addRow("名称", edit_name)
         form.addRow("角色 (scraper/dispatcher)", edit_role)
-        form.addRow("每日上限", edit_limit)
 
         btn_layout = QHBoxLayout()
         btn_ok = QPushButton("确定")
@@ -172,7 +167,6 @@ class AccountWindow(QWidget):
         raw_id = edit_id.text().strip()
         raw_name = edit_name.text().strip()
         raw_role = edit_role.text().strip()
-        raw_limit = edit_limit.text().strip()
         if not raw_id:
             return
 
@@ -181,7 +175,6 @@ class AccountWindow(QWidget):
             id=raw_id,
             name=raw_name or raw_id,
             role=raw_role or "dispatcher",
-            daily_limit=int(raw_limit) if raw_limit.isdigit() else 150,
             enabled=True,
         ))
         save_config(cfg)
@@ -203,13 +196,11 @@ class AccountWindow(QWidget):
 
         edit_name = QLineEdit(acc.name)
         edit_role = QLineEdit(acc.role)
-        edit_limit = QLineEdit(str(acc.daily_limit))
         edit_enabled = QLineEdit("是" if acc.enabled else "否")
         edit_enabled.setPlaceholderText("是 或 否")
 
         form.addRow("名称", edit_name)
         form.addRow("角色", edit_role)
-        form.addRow("每日上限", edit_limit)
         form.addRow("启用", edit_enabled)
 
         btn_layout = QHBoxLayout()
@@ -232,10 +223,6 @@ class AccountWindow(QWidget):
 
         cfg.accounts[idx].name = edit_name.text().strip() or acc.id
         cfg.accounts[idx].role = edit_role.text().strip() or "dispatcher"
-        try:
-            cfg.accounts[idx].daily_limit = int(edit_limit.text().strip())
-        except ValueError:
-            pass
         enabled_text = edit_enabled.text().strip()
         if enabled_text in ("是", "yes", "true"):
             cfg.accounts[idx].enabled = True

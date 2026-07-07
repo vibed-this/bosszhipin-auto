@@ -81,8 +81,8 @@ class ScheduleWindow(QWidget):
         # ── 3. 账号配额表 ──
         quota_box = QGroupBox("账号配额")
         quota_layout = QVBoxLayout(quota_box)
-        self._quota_table = QTableWidget(0, 5)
-        self._quota_table.setHorizontalHeaderLabels(["名称", "角色", "今日已投 / 上限", "剩余", "启用"])
+        self._quota_table = QTableWidget(0, 4)
+        self._quota_table.setHorizontalHeaderLabels(["名称", "角色", "今日已投 / 上限", "启用"])
         q_header = self._quota_table.horizontalHeader()
         q_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._quota_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -214,14 +214,12 @@ class ScheduleWindow(QWidget):
         accounts = self._storage.get_enabled_accounts()
         table.setRowCount(len(accounts))
         for i, acc in enumerate(accounts):
-            remaining = self._storage.get_remaining_quota(acc.account_id)
             role = "采集" if acc.role == "scraper" else "投递"
             enabled = "✓" if acc.enabled else "✗"
             table.setItem(i, 0, QTableWidgetItem(acc.name or acc.account_id))
             table.setItem(i, 1, QTableWidgetItem(role))
             table.setItem(i, 2, QTableWidgetItem(f"{acc.daily_count} / {acc.daily_limit}"))
-            table.setItem(i, 3, QTableWidgetItem(str(remaining)))
-            table.setItem(i, 4, QTableWidgetItem(enabled))
+            table.setItem(i, 3, QTableWidgetItem(enabled))
 
     def _refresh_backlog(self) -> None:
         self._lbl_pending.setText(f"待处理投递: {self._storage.count_pending_jobs()}")

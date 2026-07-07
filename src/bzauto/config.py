@@ -123,14 +123,12 @@ class AccountConfig(BaseModel):
 
     :ivar id: 账号唯一标识
     :ivar name: 账号显示名称
-    :ivar daily_limit: 每日投递上限
     :ivar enabled: 是否启用
     :ivar role: 角色（scraper / dispatcher）
     """
 
     id: str = ""
     name: str = ""
-    daily_limit: int = 150
     enabled: bool = True
     role: str = "dispatcher"
 
@@ -209,14 +207,12 @@ token = ""
 [[accounts]]
 id = "main"
 name = "主账号"
-daily_limit = 150
 enabled = true
 role = "scraper"
 
 [[accounts]]
 id = "sub_1"
 name = "子账号1"
-daily_limit = 150
 enabled = true
 role = "dispatcher"
 """
