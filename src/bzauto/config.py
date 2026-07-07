@@ -78,14 +78,19 @@ class ScheduleConfig(BaseModel):
 
     :ivar dispatch_times: 投递触发时间列表 (HH:MM)
     :ivar dispatch_batch_size: 每批投递数量上限
+    :ivar dispatch_total_limit: 单次调度的总沟通上限（跨账号累计）
     :ivar scrape_threshold: 投递前触发采集的 pending 数量下限
     :ivar scan_interval_minutes: 消息扫描间隔（分钟）
     :ivar delete_chat_time: 消息删拒每天执行时间 (HH:MM)
     :ivar claim_timeout_minutes: claim 超时释放（分钟）
     """
 
-    dispatch_times: list[str] = ["09:00", "14:00", "19:00"]
-    dispatch_batch_size: int = 50
+    dispatch_times: list[str] = [
+        "09:00", "10:00", "11:00", "13:00", "14:00",
+        "15:00", "16:00", "17:00", "19:00", "20:00", "21:00",
+    ]
+    dispatch_batch_size: int = 20
+    dispatch_total_limit: int = 200
     scrape_threshold: int = 50
     scan_interval_minutes: int = 15
     delete_chat_time: str = "20:00"
@@ -192,8 +197,9 @@ enabled = false
 days_threshold = 50
 
 [schedule]
-dispatch_times = ["09:00", "14:00", "19:00"]
-dispatch_batch_size = 50
+dispatch_times = ["09:00", "10:00", "11:00", "13:00", "14:00", "15:00", "16:00", "17:00", "19:00", "20:00", "21:00"]
+dispatch_batch_size = 20
+dispatch_total_limit = 200
 scrape_threshold = 50
 scan_interval_minutes = 15
 delete_chat_time = "03:00"

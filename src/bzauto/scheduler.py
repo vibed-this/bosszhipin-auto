@@ -350,16 +350,42 @@ class BzScheduler:
             ))
 
     async def _trigger_dispatch(self) -> None:
+        cfg = get_config().schedule
         accounts = self._storage.get_enabled_accounts()
         agg = NotificationAggregator(get_notifier(), f"投递报告 {datetime.datetime.now():%m-%d %H:%M}")
+        total_dispatched = 0
         for acc in accounts:
-            task = DispatchTask(acc.account_id, self._storage, get_config().schedule.dispatch_batch_size)
+            if total_dispatched >= cfg.dispatch_total_limit:
+                self._storage.insert_run(RunDoc(
+                    trigger="投递",
+                    account_id=acc.account_id,
+                    account_name=acc.name or acc.account_id,
+                    started_at=_now_iso(),
+                    finished_at=_now_iso(),
+                    status="skipped",
+                    result={"skipped": True, "skip_reason": "达到单次调度总沟通上限"},
+                    error="",
+                ))
+                agg.add_section(acc.name or acc.account_id,
+                                [f"跳过: 达到单次调度总沟通上限 ({cfg.dispatch_total_limit})"])
+                continue
+
+            task = DispatchTask(acc.account_id, self._storage, cfg.dispatch_batch_size)
             result = await self._run_and_record("投递", acc, task)
             lines = task.format_result(result)
-            if isinstance(result, BaseModel):
+
+            if isinstance(result, DispatchResult):
+                dispatched_count = result.success
                 skipped = result.skipped
+            elif isinstance(result, dict):
+                dispatched_count = result.get("success", 0)
+                skipped = result.get("skipped", False)
             else:
-                skipped = bool(result.get("skipped")) if isinstance(result, dict) else False
+                dispatched_count = 0
+                skipped = True
+
+            total_dispatched += dispatched_count
+
             if not skipped:
                 lines.append(f"今日已投 {acc.daily_count}/{acc.daily_limit}")
             agg.add_section(acc.name or acc.account_id, lines)
