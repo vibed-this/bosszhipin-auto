@@ -16,8 +16,6 @@ from apscheduler.schedulers import SchedulerNotRunningError
 
 from bzauto.config import get_config
 from bzauto.browser import get_browser_manager
-from bzauto.enums import MsgType
-from bzauto.models import classify_msg_type
 from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.flows.dispatch import DispatchFlow
 from bzauto.flows.scan import ChatScanFlow
@@ -136,15 +134,19 @@ class ScrapeChatTask(ScheduledTask):
         if updates == 0:
             return None
 
-        lines = [f"更新 {updates} 条。未读 {len(result.unread)}，拒信 {len(result.rejections)}", ""]
+        lines = [f"更新 {updates} 条。未读 {len(result.unread)}，拒信 {len(result.rejections)}"]
 
-        rejection_keys = {(r.name, r.company) for r in result.rejections}
-        for item in result.unread:
-            if (item.name, item.company) in rejection_keys:
-                continue
-            if classify_msg_type(item.lastMsg, item.sender, item.status) is MsgType.SYSTEM:
-                continue
-            lines.append(f"  {item.name}·{item.company}: {item.lastMsg}")
+        if result.invite_resume:
+            lines.append("")
+            lines.append(f"📎 邀投简历 ({len(result.invite_resume)})")
+            for item in result.invite_resume:
+                lines.append(f"  {item.name}·{item.company}")
+
+        if result.invite_interview:
+            lines.append("")
+            lines.append(f"📅 邀面试 ({len(result.invite_interview)})")
+            for item in result.invite_interview:
+                lines.append(f"  {item.name}·{item.company}")
 
         return lines
 

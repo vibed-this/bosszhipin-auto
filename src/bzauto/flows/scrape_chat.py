@@ -43,6 +43,8 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         updated_count = 0
         rejections: list[ChatItem] = []
         unread: list[ChatItem] = []
+        invite_resume: list[ChatItem] = []
+        invite_interview: list[ChatItem] = []
 
         storage = self._storage
 
@@ -50,8 +52,13 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
             all_items.append(item)
             log.info("消息：%s·%s %s", item.name, item.company, item.time)
 
-            if classify_msg_type(item.lastMsg, item.sender, item.status) is MsgType.REJECTION:
+            msg_type = classify_msg_type(item.lastMsg, item.sender, item.status)
+            if msg_type is MsgType.REJECTION:
                 rejections.append(item)
+            elif msg_type is MsgType.INVITE_RESUME:
+                invite_resume.append(item)
+            elif msg_type is MsgType.INVITE_INTERVIEW:
+                invite_interview.append(item)
             if item.sender == "other" and item.unread_count > 0:
                 unread.append(item)
 
@@ -77,4 +84,6 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
             updated=updated_count,
             rejections=rejections,
             unread=unread,
+            invite_resume=invite_resume,
+            invite_interview=invite_interview,
         )

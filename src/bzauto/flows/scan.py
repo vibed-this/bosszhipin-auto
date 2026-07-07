@@ -35,5 +35,7 @@ class ChatScanFlow:
             updated=result.updated,
             rejections=result.rejections,
             unread=result.unread,
+            invite_resume=result.invite_resume,
+            invite_interview=result.invite_interview,
             followed_up=0,
         )

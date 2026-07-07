@@ -18,6 +18,8 @@ class ScrapeChatResult(BaseModel):
     deleted: int = 0
     rejections: list[ChatItem] = []
     unread: list[ChatItem] = []
+    invite_resume: list[ChatItem] = []
+    invite_interview: list[ChatItem] = []
     followed_up: int = 0
 
 
