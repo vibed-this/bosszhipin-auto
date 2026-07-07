@@ -210,14 +210,20 @@ class BossJobListPage(BasePage):
         *,
         max_scrolls: int = 10,
         scroll_timeout: float = 5.0,
+        max_jobs: int = 0,
     ) -> AsyncIterator[tuple[JobCard, int]]:
         """异步迭代器：逐个产出职位卡片，自动处理翻页和智能滚动。"""
+        emitted = 0
         index = 0
         scroll_count = 0
         stale_rounds = 0
         max_stale = 3
 
         while True:
+            if max_jobs > 0 and emitted >= max_jobs:
+                log.info("已达采集上限 %d", max_jobs)
+                break
+
             card = await self.get_job_card_at(index)
 
             if card is None:
@@ -245,6 +251,8 @@ class BossJobListPage(BasePage):
                 continue
 
             stale_rounds = 0
+            scroll_count = 0
+            emitted += 1
             yield card, index
             index += 1
 
@@ -257,12 +265,14 @@ class BossJobListPage(BasePage):
         max_salary: int | None = None,
         max_scrolls: int = 10,
         scroll_timeout: float = 5.0,
+        max_jobs: int = 0,
     ) -> AsyncIterator[tuple[JobCard, int]]:
         """包装 iter_job_cards，按白名单/黑名单/薪资过滤并去重。"""
         seen: set[tuple[str, str]] = set()
         async for card, idx in self.iter_job_cards(
             max_scrolls=max_scrolls,
             scroll_timeout=scroll_timeout,
+            max_jobs=max_jobs,
         ):
             title = card.title.strip().lower()
             if whitelist and not any(kw in title for kw in whitelist):

@@ -17,7 +17,7 @@ from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.flows.dispatch import DispatchFlow
 from bzauto.flows.scan import ScanFlow
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
-from bzauto.flows.scrape_only import BossScrapeOnlyFlow
+from bzauto.flows.scrape_scheduled import BossScrapeScheduledFlow
 from bzauto.notify import NotificationAggregator, format_task_lines, get_notifier
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
@@ -53,10 +53,8 @@ class ScrapeTask(ScheduledTask):
         bm = get_browser_manager()
         session = bm.get_session(self._account_id)
         page = BossJobListPage(session)
-        flow = BossScrapeOnlyFlow(page, session, self._account_id, self._storage)
-        cfg = get_config()
-        jobs = await flow.run(max_scrolls=10)
-        return {"scraped": len(jobs)}
+        flow = BossScrapeScheduledFlow(page, session, self._account_id, self._storage)
+        return await flow.run()
 
 
 class DispatchTask(ScheduledTask):
@@ -148,7 +146,12 @@ class BzScheduler:
     def start(self) -> None:
         cfg = get_config().schedule
 
-        self._scheduler.add_job(self._trigger_scrape, 'cron', **parse_cron_time(cfg.scrape_time))  # type: ignore[arg-type]
+        if cfg.scrape_interval_minutes > 0:
+            self._scheduler.add_job(
+                self._trigger_scrape, 'interval', minutes=cfg.scrape_interval_minutes,
+            )
+        else:
+            self._scheduler.add_job(self._trigger_scrape, 'cron', **parse_cron_time(cfg.scrape_time))  # type: ignore[arg-type]
 
         for t in cfg.dispatch_times:
             self._scheduler.add_job(self._trigger_dispatch, 'cron', **parse_cron_time(t))  # type: ignore[arg-type]

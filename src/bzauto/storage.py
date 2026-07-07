@@ -214,7 +214,7 @@ class Storage:
             if (now - dispatched).total_seconds() > timeout_minutes * 60:
                 self._jobs.update(
                     {"dispatch_status": DispatchStatus.PENDING, "last_updated": _now_iso()},
-                    doc.doc_id,  # type: ignore[arg-type]
+                    doc_ids=[doc.doc_id],
                 )
                 count += 1
         if count:

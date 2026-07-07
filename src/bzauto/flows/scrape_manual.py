@@ -10,10 +10,10 @@ from bzauto.models import JobCard
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.storage import Storage
 
-log = logging.getLogger("flow.scrape_only")
+log = logging.getLogger("flow.scrape_manual")
 
 
-class BossScrapeOnlyFlow(BaseFlow[BossJobListPage]):
+class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
     """纯爬取流程编排：只收集职位数据，不执行沟通。"""
 
     def __init__(self, page: BossJobListPage, session: BrowserSession, account_id: str = "main", storage: Storage | None = None) -> None:
@@ -34,6 +34,7 @@ class BossScrapeOnlyFlow(BaseFlow[BossJobListPage]):
         blacklist: list[str] | None = None,
         min_salary: int | None = None,
         max_salary: int | None = None,
+        max_jobs: int = 0,
     ):
         return self._page.iter_filtered_cards(
             whitelist=whitelist or self._whitelist,
@@ -41,6 +42,7 @@ class BossScrapeOnlyFlow(BaseFlow[BossJobListPage]):
             min_salary=min_salary if min_salary is not None else self._min_salary,
             max_salary=max_salary if max_salary is not None else self._max_salary,
             max_scrolls=max_scrolls,
+            max_jobs=max_jobs,
         )
 
     async def run(
@@ -51,6 +53,7 @@ class BossScrapeOnlyFlow(BaseFlow[BossJobListPage]):
         min_salary: int | None = None,
         max_salary: int | None = None,
         reuse_existing: bool = False,
+        max_jobs: int = 0,
     ) -> list[JobCard]:
         await self._setup(url or self._jobs_url, reuse_existing=reuse_existing)
 
@@ -65,7 +68,7 @@ class BossScrapeOnlyFlow(BaseFlow[BossJobListPage]):
         seen_hrefs = self._storage.get_seen_job_hrefs() if self._storage else set()
         seen_duplicate: set[tuple[str, str]] = set()
 
-        async for card, idx in self._iter_cards(max_scrolls=max_scrolls, min_salary=min_salary, max_salary=max_salary):
+        async for card, idx in self._iter_cards(max_scrolls=max_scrolls, min_salary=min_salary, max_salary=max_salary, max_jobs=max_jobs):
             key = (card.title, card.company)
             if key in seen_duplicate:
                 continue
@@ -82,6 +85,10 @@ class BossScrapeOnlyFlow(BaseFlow[BossJobListPage]):
                 job_doc = card.to_doc(self._account_id)
                 self._storage.upsert_job(job_doc)
                 self._storage.add_seen_job_hrefs([card.href])
+
+            if len(all_jobs) >= max_jobs:
+                log.info("已达采集上限 %d 条，停止", max_jobs)
+                break
 
         log.info("完成: 共 %d 条匹配职位", len(all_jobs))
         return all_jobs

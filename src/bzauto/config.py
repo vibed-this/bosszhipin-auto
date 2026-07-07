@@ -77,6 +77,7 @@ class ScheduleConfig(BaseModel):
     """定时调度配置。
 
     :ivar scrape_time: 采集触发时间 (HH:MM)
+    :ivar scrape_interval_minutes: 定时采集间隔（分钟），0 表示仅 scrape_time 触发一次
     :ivar dispatch_times: 投递触发时间列表 (HH:MM)
     :ivar dispatch_batch_size: 每批投递数量上限
     :ivar scan_interval_minutes: 扫描间隔（分钟）
@@ -84,6 +85,7 @@ class ScheduleConfig(BaseModel):
     """
 
     scrape_time: str = "08:00"
+    scrape_interval_minutes: int = 30
     dispatch_times: list[str] = ["09:00", "14:00", "19:00"]
     dispatch_batch_size: int = 50
     scan_interval_minutes: int = 60
