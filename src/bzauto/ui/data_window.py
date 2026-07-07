@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -29,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from bzauto.config import get_config
 from bzauto.models import classify_msg_type
+from bzauto.models_doc import ConvDoc, JobDoc
 from bzauto.storage import Storage
 
 
@@ -89,6 +91,7 @@ class DataWindow(QWidget):
         self._jobs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._jobs_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._jobs_table.customContextMenuRequested.connect(self._jobs_context_menu)
+        self._jobs_table.cellDoubleClicked.connect(self._jobs_cell_double_clicked)
         self._jobs_table.setSortingEnabled(True)
         self._jobs_table.viewport().installEventFilter(self)
         layout.addWidget(self._jobs_table)
@@ -137,6 +140,7 @@ class DataWindow(QWidget):
         self._conv_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._conv_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._conv_table.customContextMenuRequested.connect(self._conv_context_menu)
+        self._conv_table.cellDoubleClicked.connect(self._conv_cell_double_clicked)
         self._conv_table.setSortingEnabled(True)
         self._conv_table.viewport().installEventFilter(self)
         layout.addWidget(self._conv_table)
@@ -186,6 +190,7 @@ class DataWindow(QWidget):
             table.setItem(i, 8, QTableWidgetItem(j.note))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, j.job_id)
         table.setSortingEnabled(True)
+        table.sortByColumn(7, Qt.SortOrder.DescendingOrder)
         total = len(self._storage.jobs.list())
         filtered = len(jobs)
         self._jobs_status_bar.setText(f"总 {total} 条 | 筛选 {filtered} 条")
@@ -231,6 +236,87 @@ class DataWindow(QWidget):
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, c.conv_id)
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole + 1, c.account)
         table.setSortingEnabled(True)
+        table.sortByColumn(10, Qt.SortOrder.DescendingOrder)
+        total = len(self._storage.conversations.list())
+        filtered = len(convs)
+        self._conv_status_bar.setText(f"总 {total} 条 | 筛选 {filtered} 条")
+
+    def _show_job_detail(self, job_id: str):
+        doc = self._storage.jobs.get(job_id)
+        if doc is None:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"投递详情 — {doc.title}")
+        dlg.setMinimumSize(500, 400)
+        form = QFormLayout(dlg)
+        field_labels = [
+            ("job_id", "ID"),
+            ("title", "职位名"),
+            ("salary_raw", "薪资"),
+            ("salary_min", "薪资下限(K)"),
+            ("salary_max", "薪资上限(K)"),
+            ("company", "公司"),
+            ("href", "链接"),
+            ("location", "地点"),
+            ("account", "采集账号"),
+            ("dispatched_by", "投递账号"),
+            ("status", "状态"),
+            ("dispatch_status", "派发状态"),
+            ("applied_at", "投递时间"),
+            ("last_updated", "最后更新"),
+            ("job_desc", "职位描述"),
+            ("note", "备注"),
+        ]
+        for field, label in field_labels:
+            val = getattr(doc, field, "")
+            if isinstance(val, list):
+                val = " · ".join(val)
+            if isinstance(val, str) and val.startswith("http"):
+                w = QLabel(f'<a href="{val}">{val}</a>')
+                w.setOpenExternalLinks(True)
+                w.setWordWrap(True)
+            else:
+                w = QLabel(str(val) if val else "(空)")
+                w.setWordWrap(True)
+            w.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            form.addRow(f"{label}:", w)
+        form.addRow(QPushButton("关闭", clicked=dlg.accept))
+        dlg.exec()
+
+    def _show_conv_detail(self, conv_id: str, account: str):
+        doc = self._storage.conversations.get(conv_id, account)
+        if doc is None:
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"对话详情 — {doc.name} @ {doc.company}")
+        dlg.setMinimumSize(500, 400)
+        form = QFormLayout(dlg)
+        field_labels = [
+            ("conv_id", "对话ID"),
+            ("account", "账号"),
+            ("name", "招聘者"),
+            ("company", "公司"),
+            ("position", "职位"),
+            ("last_msg", "最后消息"),
+            ("last_msg_time", "回复时间"),
+            ("platform_status", "平台状态"),
+            ("status", "业务状态"),
+            ("sender", "发送方"),
+            ("unread_count", "未读数"),
+            ("linked_job_id", "关联职位ID"),
+            ("first_seen_at", "首次发现"),
+            ("last_updated", "最后更新"),
+            ("note", "备注"),
+            ("unique_id", "唯一标识"),
+        ]
+        for field, label in field_labels:
+            val = getattr(doc, field, "")
+            w = QLabel(str(val) if val else "(空)")
+            w.setWordWrap(True)
+            w.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            form.addRow(f"{label}:", w)
+        form.addRow(QPushButton("关闭", clicked=dlg.accept))
+        dlg.exec()
 
     def _jobs_context_menu(self, pos):
         item = self._jobs_table.itemAt(pos)
@@ -257,10 +343,7 @@ class DataWindow(QWidget):
     def _jobs_cell_double_clicked(self, row, col):
         job_id_item = self._jobs_table.item(row, 0)
         job_id = job_id_item.data(Qt.ItemDataRole.UserRole) if job_id_item else ""
-        if col == 4:
-            self._edit_job_status(row, job_id)
-        elif col == 7:
-            self._edit_job_note(row, job_id)
+        self._show_job_detail(job_id)
 
     def _edit_job_status(self, row, job_id):
         statuses = ["已沟通", "已打招呼", "HR已读", "HR已回复", "已邀面试", "已拒绝", "已结束"]
@@ -351,10 +434,7 @@ class DataWindow(QWidget):
         conv_id_item = self._conv_table.item(row, 0)
         conv_id = conv_id_item.data(Qt.ItemDataRole.UserRole) if conv_id_item else ""
         account = conv_id_item.data(Qt.ItemDataRole.UserRole + 1) if conv_id_item else ""
-        if col == 8:
-            self._edit_conv_status(row, conv_id, account)
-        elif col == 11:
-            self._edit_conv_note(row, conv_id, account)
+        self._show_conv_detail(conv_id, account)
 
     def _load_account_filter(self):
         from bzauto.config import get_config
