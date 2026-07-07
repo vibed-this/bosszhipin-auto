@@ -167,7 +167,7 @@ class BossJobListPage(BasePage):
             if bbox and bbox.get("cx", 0) > 0:
                 await self._session.click(int(bbox["cx"]), int(bbox["cy"]))
                 await asyncio.sleep(0.5)
-            if "150" in text or "消息已满" in text or "明日再试" in text:
+            if "今日已投递" in text or "150" in text or "消息已满" in text or "明日再试" in text:
                 return False
         return True
 

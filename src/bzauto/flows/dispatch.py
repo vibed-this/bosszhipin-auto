@@ -54,6 +54,15 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
 
                 await self._page.click_chat_on_detail()
 
+                await asyncio.sleep(random.uniform(1.0, 2.0))
+                dialog_result = await self._page.dismiss_dialogs()
+                if not dialog_result:
+                    log.warning("沟通上限已达，终止投递")
+                    self._storage.mark_job_failed(job_id)
+                    self._storage.set_daily_count_maxed(self._account_id)
+                    failed += 1
+                    break
+
                 greeting = get_config().scrape.greeting
                 await self._chat_page.wait_conversation_selected(timeout=10)
                 await self._chat_page.send_message(greeting)
