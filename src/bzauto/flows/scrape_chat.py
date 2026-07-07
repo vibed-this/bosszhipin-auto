@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from bzauto.browser.session import BrowserSession
-from bzauto.enums import MsgType
+from bzauto.enums import ConvStatus, MsgType
 from bzauto.flows.base import BaseFlow
 from bzauto.models import ChatItem, classify_msg_type
 from bzauto.pages.chat_list import BossChatListPage, _CHAT_URL
@@ -70,6 +70,24 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
             )
             log.info("DB 写入完成: 新增 %d, 更新 %d", new_count, updated_count)
 
+        # 标记缺失聊天为已结束（库里有但本次 dump 无）
+        closed_count = 0
+        if storage and all_items:
+            seen_ids = {item.uniqueId for item in all_items if item.uniqueId}
+            seen_conv_ids = {item.to_doc(self._account_id).conv_id for item in all_items}
+            existing = storage.conversations.list(account=self._account_id)
+            for conv in existing:
+                if conv.status == ConvStatus.CLOSED:
+                    continue
+                if conv.unique_id and conv.unique_id in seen_ids:
+                    continue
+                if not conv.unique_id and conv.conv_id in seen_conv_ids:
+                    continue
+                storage.conversations.mark_deleted(conv.conv_id, self._account_id)
+                closed_count += 1
+            if closed_count:
+                log.info("已标记 %d 条缺失聊天为已结束", closed_count)
+
         if output:
             path = Path(output)
             path.write_text(
@@ -81,6 +99,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
             items=all_items,
             new=new_count,
             updated=updated_count,
+            deleted=closed_count,
             rejections=rejections,
             unread=unread,
             invite_resume=invite_resume,

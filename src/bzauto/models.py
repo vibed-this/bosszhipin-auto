@@ -382,9 +382,11 @@ def classify_msg_type(last_msg: str, sender: str, platform_status: str = "") -> 
 
 
 def infer_status(sender: str, unread_count: int, old_status: str, last_msg_time: str = "") -> str:
-    """推断行动性状态，不涉及消息内容分类。"""
-    if old_status == ConvStatus.CLOSED:
-        return ConvStatus.CLOSED
+    """推断行动性状态，不涉及消息内容分类。
+
+    注意：不再保留 CLOSED（每次扫描根据页面现场重新推导），
+    使得因滚动遗漏/误标而设为 CLOSED 的对话在再次出现时能自动恢复。
+    """
     if sender == "self":
         return ConvStatus.NONE
     if unread_count > 0:
