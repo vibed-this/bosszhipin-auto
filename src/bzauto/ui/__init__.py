@@ -136,8 +136,9 @@ class BzAutoApp:
         self._control.btn_delete_chat.clicked.connect(lambda: self._on_delete_chat())
         self._control.btn_dump.clicked.connect(lambda: self._on_scrape_jobs())
         self._control.btn_batch.clicked.connect(lambda: self._on_batch_chat())
+        self._control.btn_start_scheduler.clicked.connect(self._on_start_scheduler)
+        self._control.btn_stop_scheduler.clicked.connect(self._on_stop)
         self._control.btn_cancel.clicked.connect(self._on_cancel_task)
-        self._control.btn_stop.clicked.connect(self._on_stop)
         self._control.btn_config.clicked.connect(self._on_open_config)
         self._control.btn_data.clicked.connect(self._on_open_data)
         self._control.btn_account.clicked.connect(self._on_open_account)
@@ -236,6 +237,15 @@ class BzAutoApp:
             self._current_task.cancel()
             log.info("当前任务已取消")
         self._bridge.buttons_enabled.emit(True)
+
+    def _on_start_scheduler(self) -> None:
+        """启动定时调度器。"""
+        if self._scheduler is not None and self._scheduler.running:
+            log.info("调度器已在运行")
+            return
+        log.info("启动调度器")
+        self._scheduler = BzScheduler(self._task_runner, self._loop, self._storage)
+        self._scheduler.start()
 
     def _on_stop(self) -> None:
         """停止定时调度器，取消当前及队列中所有待执行任务。"""

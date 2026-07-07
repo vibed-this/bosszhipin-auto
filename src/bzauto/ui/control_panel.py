@@ -119,17 +119,23 @@ class ControlPanel(QWidget):
         sep_stop.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep_stop)
 
+        # Button: 启动调度
+        layout.addSpacing(2)
+        self.btn_start_scheduler = QPushButton("启动调度")
+        self.btn_start_scheduler.setFixedHeight(28)
+        layout.addWidget(self.btn_start_scheduler)
+
+        # Button: 停止调度 (Ctrl+W)
+        layout.addSpacing(2)
+        self.btn_stop_scheduler = QPushButton("停止调度 (Ctrl+W)")
+        self.btn_stop_scheduler.setFixedHeight(28)
+        layout.addWidget(self.btn_stop_scheduler)
+
         # Button: 取消任务 (安全取消，不碰调度器)
         layout.addSpacing(2)
         self.btn_cancel = QPushButton("取消任务")
         self.btn_cancel.setFixedHeight(28)
         layout.addWidget(self.btn_cancel)
-
-        # Button: 停止 (Ctrl+W)
-        layout.addSpacing(2)
-        self.btn_stop = QPushButton("停止 (Ctrl+W)")
-        self.btn_stop.setFixedHeight(28)
-        layout.addWidget(self.btn_stop)
 
         # Separator
         layout.addSpacing(4)
