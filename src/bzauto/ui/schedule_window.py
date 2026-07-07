@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -39,6 +40,9 @@ class ScheduleWindow(QWidget):
         self.resize(640, 560)
 
         self._build_ui()
+
+        self._btn_reset_all.clicked.connect(self._on_reset_all)
+        self._btn_run_selected.clicked.connect(self._on_run_selected)
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setInterval(5000)
@@ -76,6 +80,15 @@ class ScheduleWindow(QWidget):
         self._task_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._task_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         task_layout.addWidget(self._task_table)
+
+        btn_layout = QHBoxLayout()
+        self._btn_reset_all = QPushButton("重置所有")
+        self._btn_run_selected = QPushButton("运行选中")
+        btn_layout.addWidget(self._btn_reset_all)
+        btn_layout.addWidget(self._btn_run_selected)
+        btn_layout.addStretch()
+        task_layout.addLayout(btn_layout)
+
         layout.addWidget(task_box)
 
         # ── 3. 账号配额表 ──
@@ -127,6 +140,30 @@ class ScheduleWindow(QWidget):
         self._countdown_timer.stop()
         self.hide()
         event.ignore()
+
+    # ── 操作按钮 ──
+
+    def _on_reset_all(self) -> None:
+        sched = self._app._scheduler
+        if sched:
+            sched.reset_all_jobs()
+        self._refresh_all()
+        self._task_table.viewport().update()
+
+    def _on_run_selected(self) -> None:
+        table = self._task_table
+        selected = table.selectedItems()
+        if not selected:
+            return
+        rows = set(item.row() for item in selected)
+        sched = self._app._scheduler
+        if not sched:
+            return
+        snapshots = sched.snapshot()
+        for row in rows:
+            if row < len(snapshots):
+                sched.run_job_now(snapshots[row]["id"])
+        self._refresh_all()
 
     # ── 刷新 ──
 

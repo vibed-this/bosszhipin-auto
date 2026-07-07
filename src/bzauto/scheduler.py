@@ -207,6 +207,23 @@ class BzScheduler:
         "_trigger_scrape": "采集",
     }
 
+    def reset_all_jobs(self) -> None:
+        """重置所有任务，重新根据当前时间计算 next_run_time（模拟初始启动）。"""
+        if not self._scheduler.running:
+            return
+        for job in self._scheduler.get_jobs():
+            self._scheduler.reschedule_job(job.id, trigger=job.trigger)
+            self._persist_next_run(self._scheduler.get_job(job.id))
+
+    def run_job_now(self, job_id: str) -> None:
+        """将指定任务的 next_run_time 设为当前时间。"""
+        if not self._scheduler.running:
+            return
+        job = self._scheduler.get_job(job_id)
+        if job:
+            self._scheduler.modify_job(job_id, next_run_time=datetime.datetime.now())
+            self._persist_next_run(self._scheduler.get_job(job_id))
+
     @property
     def running(self) -> bool:
         return self._scheduler.running
