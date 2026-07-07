@@ -42,6 +42,10 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
+# 抑制第三方库调试日志
+for _log_name in ("httpcore", "httpx", "qasync", "apscheduler", "asyncio"):
+    logging.getLogger(_log_name).setLevel(logging.WARNING)
+
 log = logging.getLogger("boss.ui")
 
 
