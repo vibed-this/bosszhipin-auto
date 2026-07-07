@@ -11,7 +11,6 @@ import asyncio
 import logging
 import os
 import sys
-from typing import Any
 
 import keyboard
 import qasync
@@ -38,9 +37,10 @@ class BossChatAuto:
         self,
         url: str | None = None,
         *,
-        max_scrolls: int = 0,
         output: str | None = None,
-    ) -> dict[str, Any]:
+    ):
+        from bzauto.results import ScrapeChatResult
+
         accounts = [{"id": self._account_id, "name": self._account_id}]
         manager = BrowserManager(accounts)
         _set_browser_manager(manager)
@@ -50,7 +50,7 @@ class BossChatAuto:
         page = BossChatListPage(session)
         flow = BossScrapeChatFlow(page, session, self._account_id)
 
-        result = await flow.run(url, max_scrolls=max_scrolls, output=output)
+        result = await flow.run(url, output=output)
 
         manager.close()
         return result
@@ -72,9 +72,8 @@ def cli_main() -> None:
         url = sys.argv[1] if len(sys.argv) > 1 else "https://www.zhipin.com/web/geek/chat"
         output = sys.argv[2] if len(sys.argv) > 2 else None
         auto = BossChatAuto()
-        data = await auto.run(url, max_scrolls=2, output=output)
-        items = data.get("items", [])
-        print(f"抓取到 {len(items)} 条聊天记录 (新增 {data.get('new', 0)}, 拒信 {len(data.get('rejections', []))})")
+        data = await auto.run(url, output=output)
+        print(f"抓取到 {len(data.items)} 条聊天记录 (新增 {data.new}, 拒信 {len(data.rejections)})")
 
     loop.create_task(_main())
     with loop:

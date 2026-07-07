@@ -6,6 +6,7 @@ import logging
 from bzauto.browser.session import BrowserSession
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.pages.chat_list import BossChatListPage
+from bzauto.results import ScrapeChatResult
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.chat_scan")
@@ -21,17 +22,18 @@ class ChatScanFlow:
         self.chat_page = page
         self.scrape_flow = BossScrapeChatFlow(page, session, account_id, storage)
 
-    async def run(self) -> dict:
+    async def run(self) -> ScrapeChatResult:
         url = "https://www.zhipin.com/web/geek/chat"
 
         await self.session.ensure_tab(url, reuse_existing=True)
 
         result = await self.scrape_flow.run()
 
-        return {
-            "new": result.get("new", 0),
-            "updated": result.get("updated", 0),
-            "rejections": result.get("rejections", []),
-            "unread": result.get("unread", []),
-            "followed_up": 0,
-        }
+        return ScrapeChatResult(
+            items=result.items,
+            new=result.new,
+            updated=result.updated,
+            rejections=result.rejections,
+            unread=result.unread,
+            followed_up=0,
+        )

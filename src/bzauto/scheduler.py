@@ -8,6 +8,8 @@ import re
 import traceback
 from typing import Any
 
+from pydantic import BaseModel
+
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_MISSED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers import SchedulerNotRunningError
@@ -23,6 +25,7 @@ from bzauto.notify import NotificationAggregator, get_notifier
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.models_doc import AccountDoc, RunDoc
+from bzauto.results import DispatchResult, ScrapeChatResult, ScrapeResult
 from bzauto.storage import Storage
 from bzauto.task_runner import ScheduledTask, TaskRunner
 
@@ -52,15 +55,15 @@ class ScrapeTask(ScheduledTask):
         self._account_id = account_id
         self._storage = storage
 
-    async def execute(self) -> dict[str, Any]:
+    async def execute(self) -> ScrapeResult:
         bm = get_browser_manager()
         session = bm.get_session(self._account_id)
         page = BossJobListPage(session)
         flow = BossScrapeScheduledFlow(page, session, self._account_id, self._storage)
         return await flow.run()
 
-    def format_result(self, result: dict[str, Any]) -> list[str]:
-        return [f"采集 {result.get('scraped', 0)} 个"]
+    def format_result(self, result: ScrapeResult) -> list[str]:
+        return [f"采集 {result.scraped} 个"]
 
 
 class ScrapeManualTask(ScheduledTask):
@@ -91,27 +94,25 @@ class DispatchTask(ScheduledTask):
         self._storage = storage
         self._batch_size = batch_size
 
-    async def execute(self) -> dict[str, Any]:
+    async def execute(self) -> DispatchResult:
         cfg = get_config()
         sched_cfg = cfg.schedule
         self._storage.release_stale_claims(sched_cfg.claim_timeout_minutes)
         remaining = self._storage.get_remaining_quota(self._account_id)
         if remaining <= 0:
-            return {"skipped": "配额已满", "success": 0, "failed": 0}
+            return DispatchResult(success=0, failed=0, skipped=True, skip_reason="配额已满")
 
         bm = get_browser_manager()
         session = bm.get_session(self._account_id)
         page = BossJobListPage(session)
         flow = DispatchFlow(page, session, self._account_id, self._storage)
-        result = await flow.run(batch_size=min(remaining, self._batch_size))
-        return result
+        return await flow.run(batch_size=min(remaining, self._batch_size))
 
-    def format_result(self, result: dict[str, Any]) -> list[str]:
-        if result.get("skipped"):
-            return [f"跳过: {result['skipped']}"]
-        success = result.get("success", 0)
-        failed = result.get("failed", 0)
-        return [f"投递 {success + failed} 个 (成功 {success}, 失败 {failed})"]
+    def format_result(self, result: DispatchResult) -> list[str]:
+        if result.skipped:
+            reason = result.skip_reason or ""
+            return [f"跳过: {reason}" if reason else "跳过"]
+        return [f"投递 {result.success + result.failed} 个 (成功 {result.success}, 失败 {result.failed})"]
 
 
 class ScrapeChatTask(ScheduledTask):
@@ -121,25 +122,25 @@ class ScrapeChatTask(ScheduledTask):
         self._account_id = account_id
         self._storage = storage
 
-    async def execute(self) -> dict[str, Any]:
+    async def execute(self) -> ScrapeChatResult:
         bm = get_browser_manager()
         session = bm.get_session(self._account_id)
         page = BossChatListPage(session)
         flow = BossScrapeChatFlow(page, session, self._account_id, self._storage)
         return await flow.run()
 
-    def format_result(self, result: dict[str, Any]) -> list[str]:
+    def format_result(self, result: ScrapeChatResult) -> list[str]:
         lines = []
-        if result.get("new"):
-            lines.append(f"新对话 {result['new']} 条")
-        if result.get("deleted"):
-            lines.append(f"删拒 {result['deleted']} 条")
-        if result.get("updated"):
-            lines.append(f"更新 {result['updated']} 条")
-        for r in result.get("rejections", [])[:5]:
-            lines.append(f"  {r}")
-        if result.get("unread"):
-            lines.append(f"未读 {len(result['unread'])} 条")
+        if result.new:
+            lines.append(f"新对话 {result.new} 条")
+        if result.deleted:
+            lines.append(f"删拒 {result.deleted} 条")
+        if result.updated:
+            lines.append(f"更新 {result.updated} 条")
+        for item in result.rejections[:5]:
+            lines.append(f"  {item.name}·{item.company}: {item.lastMsg}")
+        if result.unread:
+            lines.append(f"未读 {len(result.unread)} 条")
         return lines or ["已完成"]
 
 
@@ -296,7 +297,19 @@ class BzScheduler:
     def _on_job_event(self, event) -> None:
         self._persist_next_run(self._scheduler.get_job(event.job_id))
 
-    async def _run_and_record(self, trigger: str, acc: AccountDoc, task) -> dict:
+    @staticmethod
+    def _is_skipped(result: Any) -> bool:
+        if isinstance(result, BaseModel):
+            return bool(getattr(result, "skipped", False))
+        return bool(result.get("skipped")) if isinstance(result, dict) else False
+
+    @staticmethod
+    def _to_result_dict(result: Any) -> dict:
+        if isinstance(result, BaseModel):
+            return result.model_dump()
+        return result if isinstance(result, dict) else {}
+
+    async def _run_and_record(self, trigger: str, acc: AccountDoc, task: ScheduledTask) -> Any:
         """执行任务并记录执行结果到 schedule_runs 表。
 
         :param trigger: 触发类型（采集 / 投递 / 扫描）
@@ -306,11 +319,11 @@ class BzScheduler:
         """
         started = _now_iso()
         status = "success"
-        result: dict = {}
+        result: Any = {}
         error = ""
         try:
             result = await self._runner.submit_and_wait(task)
-            if isinstance(result, dict) and result.get("skipped"):
+            if self._is_skipped(result):
                 status = "skipped"
             return result
         except Exception:
@@ -325,7 +338,7 @@ class BzScheduler:
                 started_at=started,
                 finished_at=_now_iso(),
                 status=status,
-                result=result,
+                result=self._to_result_dict(result),
                 error=error,
             ))
 
@@ -336,7 +349,11 @@ class BzScheduler:
             task = DispatchTask(acc.account_id, self._storage, get_config().schedule.dispatch_batch_size)
             result = await self._run_and_record("投递", acc, task)
             lines = task.format_result(result)
-            if not result.get("skipped"):
+            if isinstance(result, BaseModel):
+                skipped = result.skipped
+            else:
+                skipped = bool(result.get("skipped")) if isinstance(result, dict) else False
+            if not skipped:
                 lines.append(f"今日已投 {acc.daily_count}/{acc.daily_limit}")
             agg.add_section(acc.name or acc.account_id, lines)
         await agg.flush()

@@ -12,10 +12,10 @@ class ScheduledTask:
     """任务基类。"""
     name: str = ""
 
-    async def execute(self) -> dict[str, Any]:
+    async def execute(self) -> Any:
         raise NotImplementedError
 
-    def format_result(self, result: dict[str, Any]) -> list[str]:
+    def format_result(self, result: Any) -> list[str]:
         """将 execute() 返回值格式化为通知行列表。"""
         raise NotImplementedError
 
@@ -89,10 +89,10 @@ class TaskRunner:
 
 
 class _FutureTask(ScheduledTask):
-    def __init__(self, inner: ScheduledTask, future: asyncio.Future[dict[str, Any]]) -> None:
+    def __init__(self, inner: ScheduledTask, future: asyncio.Future[Any]) -> None:
         self._inner = inner
         self.future = future
         self.name = inner.name
 
-    async def execute(self) -> dict[str, Any]:
+    async def execute(self) -> Any:
         return await self._inner.execute()

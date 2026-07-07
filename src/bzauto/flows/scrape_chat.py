@@ -6,13 +6,13 @@ import json
 import logging
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
 
 from bzauto.browser.session import BrowserSession
 from bzauto.enums import ConvStatus, MsgType
 from bzauto.flows.base import BaseFlow
 from bzauto.models import ChatItem, classify_msg_type, is_older_than_week
 from bzauto.pages.chat_list import BossChatListPage, _CHAT_URL
+from bzauto.results import ScrapeChatResult
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.scrape_chat")
@@ -44,7 +44,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         url: str | None = None,
         *,
         output: str | Path | None = None,
-    ) -> dict[str, Any]:
+    ) -> ScrapeChatResult:
         await self._setup(url or self._chat_url, reuse_existing=True)
 
         # 等待消息列表未读红点载入
@@ -54,8 +54,8 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         all_items: list[ChatItem] = []
         new_count = 0
         updated_count = 0
-        rejections: list[str] = []
-        unread: list[str] = []
+        rejections: list[ChatItem] = []
+        unread: list[ChatItem] = []
 
         storage = self._storage
 
@@ -81,9 +81,9 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
                 storage.update_conv_status(conv_id, self._account_id, status)
 
                 if classify_msg_type(item.lastMsg, item.sender, item.status) is MsgType.REJECTION:
-                    rejections.append(f"{item.name}·{item.company}: {item.lastMsg}")
+                    rejections.append(item)
                 if item.sender == "other" and item.unread_count > 0:
-                    unread.append(f"{item.name}·{item.company}")
+                    unread.append(item)
 
         log.info("爬取完成: 共 %d 条聊天记录", len(all_items))
 
@@ -94,10 +94,10 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
                 encoding="utf-8",
             )
 
-        return {
-            "items": all_items,
-            "new": new_count,
-            "updated": updated_count,
-            "rejections": rejections,
-            "unread": unread,
-        }
+        return ScrapeChatResult(
+            items=all_items,
+            new=new_count,
+            updated=updated_count,
+            rejections=rejections,
+            unread=unread,
+        )

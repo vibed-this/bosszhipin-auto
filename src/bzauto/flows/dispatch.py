@@ -10,6 +10,7 @@ from bzauto.config import get_config
 from bzauto.flows.base import BaseFlow
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
+from bzauto.results import DispatchResult
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.dispatch")
@@ -23,16 +24,16 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
         self._storage = storage
         self._chat_page = BossChatListPage(session)
 
-    async def run(self, batch_size: int = 50) -> dict:
+    async def run(self, batch_size: int = 50) -> DispatchResult:
         remaining = self._storage.get_remaining_quota(self._account_id)
         if remaining <= 0:
             log.info("配额已满: account=%s", self._account_id)
-            return {"success": 0, "failed": 0, "skipped": True}
+            return DispatchResult(success=0, failed=0, skipped=True)
 
         jobs = self._storage.get_pending_jobs(min(remaining, batch_size))
         if not jobs:
             log.info("无待办 job，跳过投递: account=%s", self._account_id)
-            return {"success": 0, "failed": 0, "skipped": True}
+            return DispatchResult(success=0, failed=0, skipped=True)
 
         log.info("开始投递: account=%s batch=%d", self._account_id, len(jobs))
 
@@ -76,4 +77,4 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 failed += 1
 
         log.info("投递完成: account=%s success=%d failed=%d", self._account_id, success, failed)
-        return {"success": success, "failed": failed}
+        return DispatchResult(success=success, failed=failed)
