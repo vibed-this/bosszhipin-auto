@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, QUrl, Signal, QEvent
 from PySide6.QtGui import QShowEvent, QWindowStateChangeEvent
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMainWindow, QMenu, QPushButton, QTabWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMainWindow, QMenu, QPushButton, QSplitter, QTabWidget, QVBoxLayout, QWidget
 
 from bzauto.browser.js_helper import JS_HELPER
 from bzauto.browser.overlay import DotOverlay
@@ -86,7 +86,11 @@ class BrowserManager(QMainWindow):
 
         self._profiles_dir = profiles_dir
         self._tabs: QTabWidget = QTabWidget()
-        self.setCentralWidget(self._tabs)
+
+        self._splitter = QSplitter(Qt.Horizontal)
+        self._splitter.addWidget(self._tabs)
+        self.setCentralWidget(self._splitter)
+        self._side_splitter: QSplitter | None = None
 
         self._account_tabs: dict[str, _AccountTab] = {}
         self._sessions: dict[str, Any] = {}  # lazy init
@@ -211,6 +215,18 @@ class BrowserManager(QMainWindow):
             refresh_btn=refresh_btn,
             nav_btn=nav_btn,
         )
+
+    def set_side_panel(self, top: QWidget, bottom: QWidget) -> None:
+        """将控制面板和日志面板嵌入浏览器右侧（垂直分割）。"""
+        self._side_splitter = QSplitter(Qt.Vertical)
+        self._side_splitter.addWidget(top)
+        self._side_splitter.addWidget(bottom)
+        self._side_splitter.setStretchFactor(0, 0)
+        self._side_splitter.setStretchFactor(1, 1)
+        self._splitter.addWidget(self._side_splitter)
+        self._splitter.setStretchFactor(0, 1)
+        default_width = 200
+        self._splitter.setSizes([self.width() - default_width, default_width])
 
     def _on_tab_changed(self, index: int) -> None:
         log.debug("标签页切换到 index=%d", index)

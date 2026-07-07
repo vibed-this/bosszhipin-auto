@@ -1,4 +1,4 @@
-"""Qt 桌面 UI：主窗口(QTabWidget 多账号浏览器) + 浮动面板 + qasync 引导。"""
+"""Qt 桌面 UI：浏览器主窗口 + 右侧嵌入式控制面板/日志 + qasync 引导。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import traceback
 import keyboard
 import qasync
 
-from PySide6.QtCore import Qt, QTimer, Signal, QObject
+from PySide6.QtCore import Signal, QObject
 from PySide6.QtWidgets import QApplication
 
 from bzauto.browser import BrowserManager, get_browser_manager
@@ -100,21 +100,8 @@ class BzAutoApp:
 
     def _setup_ui(self) -> None:
         """配置 UI 布局和信号。"""
-        sg = QApplication.primaryScreen().availableGeometry()
-        margin = 20
-        gap = 50
-
+        self._manager.set_side_panel(self._control, self._log_win)
         self._manager.show()
-        self._manager.move(0, 0)
-
-        self._control.move(
-            sg.width() - self._control.width() - margin,
-            margin,
-        )
-        self._log_win.move(
-            sg.width() - self._log_win.width() - margin,
-            margin + self._control.height() + gap,
-        )
 
         # 跨线程信号连接（实际同线程，保留 Signal 接口）
         self._bridge.buttons_enabled.connect(self._control.set_buttons_enabled)
@@ -144,39 +131,6 @@ class BzAutoApp:
         self._control.btn_account.clicked.connect(self._on_open_account)
         self._control.btn_schedule.clicked.connect(self._on_open_schedule)
         self._control.btn_debug.clicked.connect(self._on_open_debug)
-
-        # 控制台/日志窗口随浏览器窗口最小化/恢复
-        self._manager.windowStateChanged.connect(self._on_manager_window_state_changed)
-        # 控制台/日志窗口随浏览器窗口激活/失焦
-        self._manager.windowActivated.connect(self._on_manager_window_activated)
-
-    def _on_manager_window_state_changed(self, state: Qt.WindowState) -> None:
-        if state & Qt.WindowState.WindowMinimized:
-            self._set_tool_windows_topmost(False)
-            self._control.hide()
-            self._log_win.hide()
-        else:
-            self._control.show()
-            self._log_win.show()
-
-    def _on_manager_window_activated(self, active: bool) -> None:
-        self._set_tool_windows_topmost(active)
-        if active:
-            self._control.raise_()
-            self._log_win.raise_()
-
-    def _set_tool_windows_topmost(self, topmost: bool) -> None:
-        for w in (self._control, self._log_win):
-            cur = w.windowFlags()
-            has_topmost = bool(cur & Qt.WindowType.WindowStaysOnTopHint)
-            if topmost and not has_topmost:
-                cur |= Qt.WindowType.WindowStaysOnTopHint
-                w.setWindowFlags(cur)
-                w.show()
-            elif not topmost and has_topmost:
-                cur &= ~Qt.WindowType.WindowStaysOnTopHint
-                w.setWindowFlags(cur)
-                w.show()
 
     async def _async_stop(self) -> None:
         """协程版停止（被 keyboard 线程调用）。"""
@@ -468,9 +422,6 @@ class BzAutoApp:
 
     def run(self) -> None:
         """启动应用（阻塞直至退出）。"""
-        self._log_win.show()
-        self._control.show()
-
         loop = qasync.QEventLoop(self._app)
         self._loop = loop
         asyncio.set_event_loop(loop)

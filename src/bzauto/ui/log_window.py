@@ -17,9 +17,6 @@ class LogWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.log_message.connect(self._append)
-        self.setWindowTitle("Boss直聘 - 日志")
-        self.setWindowFlags(Qt.WindowType.Tool)
-        self.resize(400, 300)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -43,13 +40,13 @@ class LogWindow(QWidget):
             encoding="utf-8",
         )
         self._file_handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+            _CompactFormatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%m-%d %H:%M:%S")
         )
 
         # 窗口 Handler
         self._gui_handler = _GuiHandler(self)
         self._gui_handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+            _CompactFormatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%m-%d %H:%M:%S")
         )
 
         # 挂到 root logger
@@ -64,12 +61,22 @@ class LogWindow(QWidget):
         scrollbar = self._text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
-    def closeEvent(self, event) -> None:
+    def cleanup(self) -> None:
+        """显式释放 logging handler（应用退出时调用）。"""
         root = logging.getLogger()
         root.removeHandler(self._file_handler)
         root.removeHandler(self._gui_handler)
         self._file_handler.close()
-        super().closeEvent(event)
+
+
+class _CompactFormatter(logging.Formatter):
+    """日志格式：MM-DD HH:MM:SS [E/W/I/D] 内容"""
+
+    _LEVEL_MAP = {"ERROR": "E", "WARNING": "W", "INFO": "I", "DEBUG": "D"}
+
+    def format(self, record: logging.LogRecord) -> str:
+        record.levelname = self._LEVEL_MAP.get(record.levelname, record.levelname[0])
+        return super().format(record)
 
 
 class _GuiHandler(logging.Handler):
