@@ -131,10 +131,10 @@ class ScrapeChatTask(ScheduledTask):
         flow = BossScrapeChatFlow(page, session, self._account_id, self._storage)
         return await flow.run()
 
-    def format_result(self, result: ScrapeChatResult) -> list[str]:
+    def format_result(self, result: ScrapeChatResult) -> list[str] | None:
         updates = result.new + result.updated
         if updates == 0:
-            return ["无更新"]
+            return None
 
         lines = [f"更新 {updates} 条。未读 {len(result.unread)}，拒信 {len(result.rejections)}", ""]
 
@@ -330,10 +330,12 @@ class BzScheduler:
             result = await self._runner.submit_and_wait(task)
             if self._is_skipped(result):
                 status = "skipped"
+            log.info("[%s] %s 完成 — %s", trigger, acc.name or acc.account_id, status)
             return result
         except Exception:
             status = "failed"
             error = traceback.format_exc()
+            log.error("[%s] %s 异常: %s", trigger, acc.name or acc.account_id, error)
             raise
         finally:
             self._storage.insert_run(RunDoc(
@@ -380,11 +382,16 @@ class BzScheduler:
             task = ScrapeChatTask(acc.account_id, self._storage)
             result = await self._run_and_record("消息扫描", acc, task)
             lines = task.format_result(result)
-            if lines != ["无更新"]:
+            if lines is None:
+                log.info("[消息扫描] %s 无更新", acc.name or acc.account_id)
+                agg.add_section(acc.name or acc.account_id, ["无更新"])
+            else:
                 any_update = True
-            agg.add_section(acc.name or acc.account_id, lines)
+                agg.add_section(acc.name or acc.account_id, lines)
         if any_update:
             await agg.flush()
+        else:
+            log.info("[消息扫描] 全部账号无更新，跳过通知")
 
     async def _trigger_delete_chat(self) -> None:
         accounts = self._storage.get_enabled_accounts()
