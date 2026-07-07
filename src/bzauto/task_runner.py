@@ -43,6 +43,20 @@ class TaskRunner:
         if self._current_exec is not None and not self._current_exec.done():
             self._current_exec.cancel()
 
+    def cancel_pending(self) -> None:
+        """取消当前任务并清空队列中所有待执行任务。"""
+        self.cancel_current()
+        while not self._queue.empty():
+            try:
+                task = self._queue.get_nowait()
+                if isinstance(task, _FutureTask):
+                    try:
+                        task.future.set_exception(asyncio.CancelledError())
+                    except asyncio.InvalidStateError:
+                        pass
+            except asyncio.QueueEmpty:
+                break
+
     async def _worker(self) -> None:
         while True:
             try:

@@ -238,11 +238,16 @@ class BzAutoApp:
         self._bridge.buttons_enabled.emit(True)
 
     def _on_stop(self) -> None:
-        """停止当前任务和定时调度器。"""
+        """停止定时调度器，取消当前及队列中所有待执行任务。"""
         log.info("停止信号触发")
         if self._scheduler:
             self._scheduler.stop()
-        self._on_cancel_task()
+        if self._task_runner is not None:
+            self._task_runner.cancel_pending()
+        if self._current_task is not None and not self._current_task.done():
+            self._current_task.cancel()
+            log.info("当前任务已取消")
+        self._bridge.buttons_enabled.emit(True)
 
     # ── 任务管理 ──
 
