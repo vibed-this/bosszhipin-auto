@@ -88,57 +88,85 @@ JSON.stringify((function() {
     async def iter_chat_items(
         self,
         *,
-        scroll_timeout: float = 5.0,
+        scroll_timeout: float = 30.0,
     ) -> AsyncIterator[ChatItem]:
-        """全量捞取 dataSources，滚动补全后依次 yield 不重复项。"""
-        max_scrolls = 3
-        seen: set[str] = set()
-        scroll_count = 0
+        """JS 先滚动到底部（按高度无变化算），再一次性 dump 所有数据。"""
+        await self._session.eval_js("""
+(function() {
+    window.__bz_chat_data = null;
+    window.__bz_chat_scroll_done = false;
 
-        while True:
-            items = await self.get_chat_items(limit=999)
+    var container = document.querySelector('.user-list-content');
+    if (!container) {
+        window.__bz_chat_scroll_done = true;
+        return;
+    }
 
-            new_found = False
-            for item in items:
-                uid = item.uniqueId
-                if uid and uid not in seen:
-                    seen.add(uid)
-                    new_found = True
-                    yield item
+    var lastHeight = -1;
+    var maxAttempts = 40;
+    var attempt = 0;
 
-            if new_found:
-                scroll_count = 0
-                continue
-
-            if scroll_count >= max_scrolls:
-                log.info("已达最大滚动次数 %d", max_scrolls)
-                break
-
-            scroll_count += 1
-            log.info("无新数据，尝试智能滚动 #%d...", scroll_count)
-
-            # 智能滚动：先滚到底部上方 300px，等 300ms 再滚到最底部
-            await self._session.eval_js("""
-(function () {
-    var c = document.querySelector('.user-list-content');
-    if (!c) return;
-
-    var count = 0;
-    var scroll = function () {
-        if (count++ % 2 === 0) {
-            c.scrollTop = Math.max(0, c.scrollHeight - 300);
-        } else {
-            c.scrollTop = c.scrollHeight;
+    function doScroll() {
+        if (attempt >= maxAttempts) {
+            finish();
+            return;
         }
-        if (count < 10) {
-            window.setTimeout(scroll, 300);
+        attempt++;
+        container.scrollTop = container.scrollHeight;
+        var currentHeight = container.scrollHeight;
+        if (currentHeight === lastHeight) {
+            finish();
+        } else {
+            lastHeight = currentHeight;
+            setTimeout(doScroll, 800);
         }
     }
-    scroll();
+
+    function finish() {
+        var el = document.querySelector('.user-list-content');
+        if (el && el.__vue__) {
+            var ds = el.__vue__.$props && el.__vue__.$props.dataSources;
+            if (Array.isArray(ds)) {
+                window.__bz_chat_data = ds.map(function(s) {
+                    return {
+                        name: s.name,
+                        brandName: s.brandName,
+                        title: s.title,
+                        lastText: s.lastText,
+                        lastTS: s.lastTS,
+                        lastMsgStatus: s.lastMsgStatus,
+                        unreadCount: s.unreadCount,
+                        lastIsSelf: s.lastIsSelf,
+                        uniqueId: s.uniqueId,
+                        jobId: s.jobId,
+                    };
+                });
+            }
+        }
+        window.__bz_chat_scroll_done = true;
+    }
+
+    doScroll();
 })()
-            """
-            )
-            await asyncio.sleep(scroll_timeout)
+        """)
+
+        deadline = time.monotonic() + scroll_timeout
+        while time.monotonic() < deadline:
+            done = await self._session.eval_js("window.__bz_chat_scroll_done === true")
+            if done:
+                break
+            await asyncio.sleep(0.3)
+        else:
+            log.warning("聊天列表滚动超时 (%s 秒)", scroll_timeout)
+
+        raw = await self._session.eval_js("window.__bz_chat_data ? JSON.stringify(window.__bz_chat_data) : '[]'")
+        items = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        seen: set[str] = set()
+        for item in items:
+            uid = item.get("uniqueId", "")
+            if uid and uid not in seen:
+                seen.add(uid)
+                yield ChatItem.from_vue_row(item)
 
     async def is_chat_page(self) -> bool:
         url = self._session.current_url
