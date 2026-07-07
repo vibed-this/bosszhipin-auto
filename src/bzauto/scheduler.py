@@ -16,6 +16,8 @@ from apscheduler.schedulers import SchedulerNotRunningError
 
 from bzauto.config import get_config
 from bzauto.browser import get_browser_manager
+from bzauto.enums import MsgType
+from bzauto.models import classify_msg_type
 from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.flows.dispatch import DispatchFlow
 from bzauto.flows.scan import ChatScanFlow
@@ -130,18 +132,21 @@ class ScrapeChatTask(ScheduledTask):
         return await flow.run()
 
     def format_result(self, result: ScrapeChatResult) -> list[str]:
-        lines = []
-        if result.new:
-            lines.append(f"新对话 {result.new} 条")
-        if result.deleted:
-            lines.append(f"删拒 {result.deleted} 条")
-        if result.updated:
-            lines.append(f"更新 {result.updated} 条")
-        for item in result.rejections[:5]:
+        updates = result.new + result.updated
+        if updates == 0:
+            return ["无更新"]
+
+        lines = [f"更新 {updates} 条。未读 {len(result.unread)}，拒信 {len(result.rejections)}", ""]
+
+        rejection_keys = {(r.name, r.company) for r in result.rejections}
+        for item in result.unread:
+            if (item.name, item.company) in rejection_keys:
+                continue
+            if classify_msg_type(item.lastMsg, item.sender, item.status) is MsgType.SYSTEM:
+                continue
             lines.append(f"  {item.name}·{item.company}: {item.lastMsg}")
-        if result.unread:
-            lines.append(f"未读 {len(result.unread)} 条")
-        return lines or ["已完成"]
+
+        return lines
 
 
 class DeleteChatTask(ScheduledTask):
@@ -370,11 +375,16 @@ class BzScheduler:
     async def _trigger_scrape_chat(self) -> None:
         accounts = self._storage.get_enabled_accounts()
         agg = NotificationAggregator(get_notifier(), f"消息扫描 {datetime.datetime.now():%m-%d %H:%M}")
+        any_update = False
         for acc in accounts:
             task = ScrapeChatTask(acc.account_id, self._storage)
             result = await self._run_and_record("消息扫描", acc, task)
-            agg.add_section(acc.name or acc.account_id, task.format_result(result))
-        await agg.flush()
+            lines = task.format_result(result)
+            if lines != ["无更新"]:
+                any_update = True
+            agg.add_section(acc.name or acc.account_id, lines)
+        if any_update:
+            await agg.flush()
 
     async def _trigger_delete_chat(self) -> None:
         accounts = self._storage.get_enabled_accounts()
