@@ -8,6 +8,7 @@ import re
 import traceback
 from typing import Any
 
+from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_MISSED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers import SchedulerNotRunningError
 
@@ -26,6 +27,8 @@ from bzauto.storage import Storage
 from bzauto.task_runner import ScheduledTask, TaskRunner
 
 log = logging.getLogger("boss.scheduler")
+
+_MISFIRE_GRACE = 86400  # 24h，重启后补执行窗口
 
 
 def _now_iso() -> str:
@@ -136,14 +139,41 @@ class BzScheduler:
     def start(self) -> None:
         cfg = get_config().schedule
 
-        for t in cfg.dispatch_times:
-            self._scheduler.add_job(self._trigger_dispatch, 'cron', **parse_cron_time(t))  # type: ignore[arg-type]
+        for i, t in enumerate(cfg.dispatch_times):
+            job_id = f"dispatch_{i}"
+            nxt = self._load_next_run(job_id)
+            kwargs: dict[str, Any] = dict(
+                misfire_grace_time=_MISFIRE_GRACE,
+                coalesce=True,
+            )
+            if nxt is not None:
+                kwargs["next_run_time"] = nxt
+            self._scheduler.add_job(
+                self._trigger_dispatch, 'cron', id=job_id,
+                **parse_cron_time(t), **kwargs,
+            )
 
+        nxt = self._load_next_run("scan")
+        kwargs = dict(
+            misfire_grace_time=_MISFIRE_GRACE,
+            coalesce=True,
+        )
+        if nxt is not None:
+            kwargs["next_run_time"] = nxt
         self._scheduler.add_job(
-            self._trigger_scan, 'interval', minutes=cfg.scan_interval_minutes,
+            self._trigger_scan, 'interval', id="scan",
+            minutes=cfg.scan_interval_minutes, **kwargs,
         )
 
+        self._scheduler.add_listener(
+            self._on_job_event, EVENT_JOB_EXECUTED | EVENT_JOB_MISSED,
+        )
         self._scheduler.start()
+
+        # start() 后 APScheduler 才计算出 next_run_time，首次运行需要持久化
+        for job in self._scheduler.get_jobs():
+            self._persist_next_run(job)
+
         log.info("调度器已启动")
 
     def stop(self) -> None:
@@ -187,6 +217,20 @@ class BzScheduler:
                 "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
             })
         return results
+
+    def _load_next_run(self, job_id: str) -> datetime.datetime | None:
+        val = self._storage.get_meta(f"next_run:{job_id}")
+        try:
+            return datetime.datetime.fromisoformat(val) if val else None
+        except (ValueError, TypeError):
+            return None
+
+    def _persist_next_run(self, job) -> None:
+        if job and job.next_run_time:
+            self._storage.set_meta(f"next_run:{job.id}", job.next_run_time.isoformat())
+
+    def _on_job_event(self, event) -> None:
+        self._persist_next_run(self._scheduler.get_job(event.job_id))
 
     async def _run_and_record(self, trigger: str, acc: AccountDoc, task) -> dict:
         """执行任务并记录执行结果到 schedule_runs 表。
