@@ -247,7 +247,7 @@ class BossJobListPage(BasePage):
                     "  window.scrollTo(0, document.body.scrollHeight);"
                     "})()"
                 )
-                await asyncio.sleep(5)
+                await asyncio.sleep(10)
                 continue
 
             stale_rounds = 0
