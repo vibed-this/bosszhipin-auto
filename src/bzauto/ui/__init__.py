@@ -12,7 +12,7 @@ import traceback
 import keyboard
 import qasync
 
-from PySide6.QtCore import Qt, Signal, QObject
+from PySide6.QtCore import Qt, QTimer, Signal, QObject
 from PySide6.QtWidgets import QApplication
 
 from bzauto.browser import BrowserManager, get_browser_manager
@@ -152,6 +152,7 @@ class BzAutoApp:
 
     def _on_manager_window_state_changed(self, state: Qt.WindowState) -> None:
         if state & Qt.WindowState.WindowMinimized:
+            self._set_tool_windows_topmost(False)
             self._control.hide()
             self._log_win.hide()
         else:
@@ -159,11 +160,23 @@ class BzAutoApp:
             self._log_win.show()
 
     def _on_manager_window_activated(self, active: bool) -> None:
+        self._set_tool_windows_topmost(active)
         if active:
             self._control.raise_()
-            self._control.activateWindow()
             self._log_win.raise_()
-            self._log_win.activateWindow()
+
+    def _set_tool_windows_topmost(self, topmost: bool) -> None:
+        for w in (self._control, self._log_win):
+            cur = w.windowFlags()
+            has_topmost = bool(cur & Qt.WindowType.WindowStaysOnTopHint)
+            if topmost and not has_topmost:
+                cur |= Qt.WindowType.WindowStaysOnTopHint
+                w.setWindowFlags(cur)
+                w.show()
+            elif not topmost and has_topmost:
+                cur &= ~Qt.WindowType.WindowStaysOnTopHint
+                w.setWindowFlags(cur)
+                w.show()
 
     async def _async_stop(self) -> None:
         """协程版停止（被 keyboard 线程调用）。"""

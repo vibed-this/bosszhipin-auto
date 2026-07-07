@@ -239,14 +239,11 @@ class BrowserManager(QMainWindow):
         container.deleteLater()
 
     def activate_account(self, account_id: str) -> None:
-        """切换到指定账号的标签页并将主窗口带到前台。"""
+        """切换到指定账号的标签页。"""
         for idx, (aid, atab) in enumerate(self._account_tabs.items()):
             if aid == account_id:
                 self._tabs.setCurrentIndex(idx)
                 atab.view.setFocus()
-                atab.view.raise_()
-                self.raise_()
-                self.activateWindow()
                 return
         log.warning("账号 %s 不存在", account_id)
 
