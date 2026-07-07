@@ -31,7 +31,7 @@ QWebEngineView 桌面浏览器自动控制，支持多账号独立 Profile、JS 
 │       ├── config.py             # AppConfig + TOML 读写
 │       ├── models.py             # JobCard / ChatItem
 │       ├── enums.py              # JobStatus / DispatchStatus / ConvStatus
-│       ├── storage.py            # Storage — TinyDB 封装
+│       ├── storage.py            # Storage — sqlite-utils 仓库模式封装
 │       ├── task_runner.py        # TaskRunner — 串行异步任务队列
 │       ├── scheduler.py          # BzScheduler — APScheduler 定时调度
 │       ├── notify.py             # NapCatNotifier + NotificationAggregator
