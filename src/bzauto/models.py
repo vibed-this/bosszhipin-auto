@@ -359,6 +359,16 @@ def classify_msg_type(last_msg: str, sender: str, platform_status: str = "") -> 
             return MsgType.SYSTEM
         if last_msg.startswith("您好") and platform_status == "已读":
             return MsgType.REJECTION
+        return MsgType.NORMAL
+
+    if any(kw in last_msg for kw in _REJECTION_KWS):
+        return MsgType.REJECTION
+
+    if any(kw in last_msg for kw in _INVITE_INTERVIEW_KWS):
+        return MsgType.INVITE_INTERVIEW
+    if any(kw in last_msg for kw in _INVITE_RESUME_KWS):
+        return MsgType.INVITE_RESUME
+
     return MsgType.NORMAL
 
 
@@ -373,13 +383,3 @@ def infer_status(sender: str, unread_count: int, old_status: str, last_msg_time:
             return ConvStatus.FOLLOW_UP
         return ConvStatus.PENDING
     return ConvStatus.NONE
-
-    if any(kw in last_msg for kw in _REJECTION_KWS):
-        return MsgType.REJECTION
-
-    if any(kw in last_msg for kw in _INVITE_INTERVIEW_KWS):
-        return MsgType.INVITE_INTERVIEW
-    if any(kw in last_msg for kw in _INVITE_RESUME_KWS):
-        return MsgType.INVITE_RESUME
-
-    return MsgType.NORMAL
