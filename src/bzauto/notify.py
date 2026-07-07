@@ -46,10 +46,6 @@ def format_task_lines(task_name: str, result: dict[str, Any] | list) -> list[str
         n = result.get("deleted", 0) if isinstance(result, dict) else len(result) if isinstance(result, list) else 0
         return [f"删除 {n} 条"]
 
-    if task_name == "抓取沟通":
-        n = result.get("scraped_and_chatted", 0) if isinstance(result, dict) else len(result) if isinstance(result, list) else 0
-        return [f"抓取并沟通 {n} 个"]
-
     return [f"已完成"]
 
 

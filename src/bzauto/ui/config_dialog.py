@@ -191,23 +191,33 @@ class ConfigDialog(QDialog):
 
     def _on_test_notify(self):
         import asyncio
+        from PySide6.QtWidgets import QMessageBox
+
         cfg = self._collect_config()
         nc = cfg.notification.napcat
         notifier = NapCatNotifier(nc.base_url, nc.msg_type, nc.target_id, nc.token)
 
         async def _send():
             try:
-                await notifier.send("🔔 测试通知", "这是一条来自 bosszhipin-auto 的测试消息\n如果收到说明配置正确")
+                await notifier.send("测试通知", "这是一条来自 bosszhipin-auto 的测试消息\n如果收到说明配置正确")
                 await notifier.close()
             except Exception as e:
                 raise
 
         try:
-            asyncio.run(_send())
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "测试通知", "发送成功")
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                async def _and_show():
+                    try:
+                        await _send()
+                        QMessageBox.information(self, "测试通知", "发送成功")
+                    except Exception as e2:
+                        QMessageBox.warning(self, "发送失败", str(e2))
+                loop.create_task(_and_show())
+            else:
+                asyncio.run(_send())
+                QMessageBox.information(self, "测试通知", "发送成功")
         except Exception as e:
-            from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "发送失败", str(e))
 
     def _on_open(self):

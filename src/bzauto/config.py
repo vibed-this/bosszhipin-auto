@@ -86,7 +86,7 @@ class ScheduleConfig(BaseModel):
     dispatch_times: list[str] = ["09:00", "14:00", "19:00"]
     dispatch_batch_size: int = 50
     scrape_threshold: int = 50
-    scan_interval_minutes: int = 60
+    scan_interval_minutes: int = 15
     claim_timeout_minutes: int = 30
 
 

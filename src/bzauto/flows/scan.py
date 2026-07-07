@@ -15,13 +15,13 @@ log = logging.getLogger("flow.scan")
 class ScanFlow:
     """编排扫描任务的完整流程。"""
 
-    def __init__(self, session: BrowserSession, account_id: str, storage: Storage) -> None:
+    def __init__(self, page: BossChatListPage, session: BrowserSession, account_id: str, storage: Storage) -> None:
         self.session = session
         self._account_id = account_id
         self._storage = storage
-        self.chat_page = BossChatListPage(session)
-        self.scrape_flow = BossScrapeChatFlow(self.chat_page, session, account_id, storage)
-        self.delete_flow = BossDeleteChatFlow(self.chat_page, session, account_id, storage)
+        self.chat_page = page
+        self.scrape_flow = BossScrapeChatFlow(page, session, account_id, storage)
+        self.delete_flow = BossDeleteChatFlow(page, session, account_id, storage)
 
     async def run(self) -> dict:
         url = "https://www.zhipin.com/web/geek/chat"

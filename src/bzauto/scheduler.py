@@ -60,6 +60,23 @@ class ScrapeTask(ScheduledTask):
         return await flow.run()
 
 
+class ScrapeManualTask(ScheduledTask):
+    name = "采集"
+
+    def __init__(self, account_id: str, storage: Storage) -> None:
+        self._account_id = account_id
+        self._storage = storage
+
+    async def execute(self) -> dict[str, Any]:
+        from bzauto.flows.scrape_manual import BossScrapeManualFlow
+        bm = get_browser_manager()
+        session = bm.get_session(self._account_id)
+        page = BossJobListPage(session)
+        flow = BossScrapeManualFlow(page, session, self._account_id, self._storage)
+        jobs = await flow.run(max_scrolls=50, max_jobs=999)
+        return {"scraped": len(jobs), "skipped": False}
+
+
 class DispatchTask(ScheduledTask):
     name = "投递"
 
@@ -124,7 +141,8 @@ class ScanTask(ScheduledTask):
     async def execute(self) -> dict[str, Any]:
         bm = get_browser_manager()
         session = bm.get_session(self._account_id)
-        flow = ScanFlow(session, self._account_id, self._storage)
+        page = BossChatListPage(session)
+        flow = ScanFlow(page, session, self._account_id, self._storage)
         return await flow.run()
 
 
@@ -186,6 +204,7 @@ class BzScheduler:
     _JOB_LABEL_MAP: dict[str, str] = {
         "_trigger_dispatch": "投递",
         "_trigger_scan": "扫描",
+        "_trigger_scrape": "采集",
     }
 
     @property
@@ -275,6 +294,15 @@ class BzScheduler:
             if not result.get("skipped"):
                 lines.append(f"今日已投 {acc.daily_count}/{acc.daily_limit}")
             agg.add_section(acc.name or acc.account_id, lines)
+        await agg.flush()
+
+    async def _trigger_scrape(self) -> None:
+        accounts = self._storage.get_enabled_accounts()
+        agg = NotificationAggregator(get_notifier(), f"采集报告 {datetime.datetime.now():%m-%d %H:%M}")
+        for acc in accounts:
+            task = ScrapeTask(acc.account_id, self._storage)
+            result = await self._run_and_record("采集", acc, task)
+            agg.add_section(acc.name or acc.account_id, format_task_lines("采集", result))
         await agg.flush()
 
     async def _trigger_scan(self) -> None:

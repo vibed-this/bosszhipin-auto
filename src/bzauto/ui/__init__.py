@@ -27,6 +27,7 @@ from bzauto.scheduler import (
     DispatchTask,
     ScanTask,
     ScrapeChatTask,
+    ScrapeManualTask,
     ScrapeTask,
 )
 from bzauto.ui.control_panel import ControlPanel
@@ -119,18 +120,20 @@ class BzAutoApp:
 
         # 全局快捷键 — 通过 run_coroutine_threadsafe 投递到 qasync 循环
         keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
-        keyboard.add_hotkey(
-            "ctrl+w",
-            lambda: asyncio.run_coroutine_threadsafe(
-                self._async_stop(), self._loop,
-            ).result() if self._loop else None,
-        )
+        def _stop_threadsafe():
+            f = asyncio.run_coroutine_threadsafe(self._async_stop(), self._loop)
+            try:
+                f.result(timeout=5)
+            except Exception:
+                pass
+        keyboard.add_hotkey("ctrl+w", _stop_threadsafe)
 
         # 连接按钮信号
         self._control.btn_scrape_chat.clicked.connect(lambda: self._on_scrape_chat())
         self._control.btn_delete_chat.clicked.connect(lambda: self._on_delete_chat())
         self._control.btn_dump.clicked.connect(lambda: self._on_scrape_jobs())
         self._control.btn_batch.clicked.connect(lambda: self._on_batch_chat())
+        self._control.btn_cancel.clicked.connect(self._on_cancel_task)
         self._control.btn_stop.clicked.connect(self._on_stop)
         self._control.btn_config.clicked.connect(self._on_open_config)
         self._control.btn_data.clicked.connect(self._on_open_data)
@@ -195,29 +198,37 @@ class BzAutoApp:
 
     # ── UI 按钮 → ScheduledTask ──
 
+    def _get_selected_account(self) -> str:
+        return self._control.selected_account()
+
     def _on_scrape_chat(self) -> None:
-        self._submit(ScrapeChatTask("main", self._storage))
+        self._submit(ScrapeChatTask(self._get_selected_account(), self._storage))
 
     def _on_scrape_jobs(self) -> None:
-        self._submit(ScrapeTask("main", self._storage))
+        self._submit(ScrapeTask(self._get_selected_account(), self._storage))
 
     def _on_batch_chat(self) -> None:
-        self._submit(DispatchTask("main", self._storage, get_config().schedule.dispatch_batch_size))
+        self._submit(DispatchTask(self._get_selected_account(), self._storage, get_config().schedule.dispatch_batch_size))
 
     def _on_delete_chat(self) -> None:
-        self._submit(DeleteChatTask("main", self._storage))
+        self._submit(DeleteChatTask(self._get_selected_account(), self._storage))
 
-    def _on_stop(self) -> None:
-        """停止当前任务和定时调度器。"""
-        log.info("停止信号触发")
-        if self._scheduler:
-            self._scheduler.stop()
+    def _on_cancel_task(self) -> None:
+        """仅取消当前运行任务，不碰调度器。"""
+        log.info("取消当前任务")
         if self._task_runner is not None:
             self._task_runner.cancel_current()
         if self._current_task is not None and not self._current_task.done():
             self._current_task.cancel()
             log.info("当前任务已取消")
         self._bridge.buttons_enabled.emit(True)
+
+    def _on_stop(self) -> None:
+        """停止当前任务和定时调度器。"""
+        log.info("停止信号触发")
+        if self._scheduler:
+            self._scheduler.stop()
+        self._on_cancel_task()
 
     # ── 任务管理 ──
 
@@ -227,13 +238,13 @@ class BzAutoApp:
             return
 
         self._bridge.buttons_enabled.emit(False)
+        self._bridge.debug_running.emit(True)
         log.info("开始 %s...", task.name)
 
         assert self._loop is not None
-        self._current_task = self._loop.create_task(
-            self._run_and_notify(task),
-        )
-        self._current_task.add_done_callback(self._on_task_done)
+        t = self._loop.create_task(self._run_and_notify(task))
+        self._current_task = t
+        t.add_done_callback(self._on_task_done)
 
     async def _run_and_notify(self, task: ScheduledTask) -> dict:
         """执行 ScheduledTask 并通过 TaskRunner 排队，完成后通知。"""
@@ -261,23 +272,25 @@ class BzAutoApp:
             tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
             log.error("任务失败:\n%s", tb)
         self._bridge.buttons_enabled.emit(True)
+        self._bridge.debug_running.emit(False)
 
     # ── 公共 Debug 方法 ──
 
     def run_debug_task(self, task_name: str, account_id: str,
-                       via_runner: bool, timeout: float = 120) -> None:
+                       timeout: float = 120) -> None:
         if self._current_task is not None and not self._current_task.done():
             log.warning("已有任务在运行，请等待完成")
             return
         self._bridge.debug_running.emit(True)
         self._bridge.buttons_enabled.emit(False)
-        log.info("开始 Debug %s (account=%s, via_runner=%s, timeout=%s)",
-                 task_name, account_id, via_runner, timeout)
+        log.info("开始 Debug %s (account=%s, timeout=%s)",
+                 task_name, account_id, timeout)
         assert self._loop is not None
-        self._current_task = self._loop.create_task(
-            self._run_debug_async(task_name, account_id, via_runner, timeout),
+        t = self._loop.create_task(
+            self._run_debug_async(task_name, account_id, timeout),
         )
-        self._current_task.add_done_callback(self._on_debug_done)
+        self._current_task = t
+        t.add_done_callback(self._on_debug_done)
 
     def run_debug_trigger(self, trigger_name: str, timeout: float = 300) -> None:
         if self._current_task is not None and not self._current_task.done():
@@ -287,10 +300,11 @@ class BzAutoApp:
         self._bridge.buttons_enabled.emit(False)
         log.info("开始 Debug 触发%s (timeout=%s)", trigger_name, timeout)
         assert self._loop is not None
-        self._current_task = self._loop.create_task(
+        t = self._loop.create_task(
             self._run_debug_trigger_async(trigger_name, timeout),
         )
-        self._current_task.add_done_callback(self._on_debug_done)
+        self._current_task = t
+        t.add_done_callback(self._on_debug_done)
 
     def get_debug_status(self) -> str:
         """返回调度器状态文本（jobs + 连接账号 + 配额）。"""
@@ -325,29 +339,25 @@ class BzAutoApp:
     def _create_debug_task(task_name: str, account_id: str, storage: Storage) -> ScheduledTask:
         from bzauto.config import get_config
         mapping = {
-            "采集": ScrapeTask(account_id, storage),
+            "采集": ScrapeManualTask(account_id, storage),
             "投递": DispatchTask(account_id, storage, get_config().schedule.dispatch_batch_size),
             "扫描": ScanTask(account_id, storage),
             "聊天爬取": ScrapeChatTask(account_id, storage),
             "删拒": DeleteChatTask(account_id, storage),
-            "批量沟通": DispatchTask(account_id, storage, get_config().schedule.dispatch_batch_size),
         }
         return mapping[task_name]
 
     async def _run_debug_async(self, task_name: str, account_id: str,
-                               via_runner: bool, timeout: float) -> None:
+                               timeout: float) -> None:
         import time
         start = time.monotonic()
         try:
             task = self._create_debug_task(task_name, account_id, self._storage)
 
-            if via_runner:
-                while self._task_runner is None:
-                    await asyncio.sleep(0.05)
-                result = await asyncio.wait_for(
-                    self._task_runner.submit_and_wait(task), timeout=timeout)
-            else:
-                result = await asyncio.wait_for(task.execute(), timeout=timeout)
+            while self._task_runner is None:
+                await asyncio.sleep(0.05)
+            result = await asyncio.wait_for(
+                self._task_runner.submit_and_wait(task), timeout=timeout)
 
             elapsed = time.monotonic() - start
             lines = format_task_lines(task.name, result)
@@ -359,9 +369,8 @@ class BzAutoApp:
 
         except asyncio.TimeoutError:
             elapsed = time.monotonic() - start
-            path = "TaskRunner" if via_runner else "直接执行"
             self._bridge.debug_error.emit(
-                task_name, f"超时 ({elapsed:.1f}s, {path})")
+                task_name, f"超时 ({elapsed:.1f}s)")
         except Exception:
             self._bridge.debug_error.emit(task_name, traceback.format_exc())
 
@@ -388,6 +397,9 @@ class BzAutoApp:
     def _on_debug_done(self, future: asyncio.Future) -> None:
         self._bridge.debug_running.emit(False)
         self._bridge.buttons_enabled.emit(True)
+        # 自动刷新 debug 状态
+        if self._debug_win is not None and self._debug_win.isVisible():
+            self._debug_win._refresh_status()
 
     # ── 异步初始化 ──
 

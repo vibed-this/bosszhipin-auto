@@ -4,11 +4,16 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
+    QComboBox,
     QFrame,
+    QHBoxLayout,
+    QLabel,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
+
+from bzauto.config import get_config
 
 
 class ControlPanel(QWidget):
@@ -24,6 +29,20 @@ class ControlPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 4, 6, 4)
         layout.setSpacing(0)
+
+        # Account selector
+        layout.addSpacing(2)
+        account_row = QHBoxLayout()
+        account_row.setContentsMargins(2, 2, 2, 2)
+        account_row.addWidget(QLabel("账号:"))
+        self._account_combo = QComboBox()
+        self._account_combo.setFixedHeight(24)
+        self._account_combo.setMinimumWidth(90)
+        self._refresh_accounts()
+        account_row.addWidget(self._account_combo)
+        layout.addLayout(account_row)
+
+        layout.addSpacing(4)
 
         # Button: 聊天爬取
         layout.addSpacing(2)
@@ -100,6 +119,12 @@ class ControlPanel(QWidget):
         sep_stop.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep_stop)
 
+        # Button: 取消任务 (安全取消，不碰调度器)
+        layout.addSpacing(2)
+        self.btn_cancel = QPushButton("取消任务")
+        self.btn_cancel.setFixedHeight(28)
+        layout.addWidget(self.btn_cancel)
+
         # Button: 停止 (Ctrl+W)
         layout.addSpacing(2)
         self.btn_stop = QPushButton("停止 (Ctrl+W)")
@@ -130,6 +155,16 @@ class ControlPanel(QWidget):
             self.btn_dump,
             self.btn_batch,
         ]
+
+    def selected_account(self) -> str:
+        return self._account_combo.currentText()
+
+    def _refresh_accounts(self) -> None:
+        self._account_combo.clear()
+        for a in get_config().accounts:
+            if a.enabled:
+                label = f"{a.name or a.id}" if a.name else a.id
+                self._account_combo.addItem(a.id, label)
 
     def set_buttons_enabled(self, enabled: bool) -> None:
         """启用/禁用所有任务按钮。"""
