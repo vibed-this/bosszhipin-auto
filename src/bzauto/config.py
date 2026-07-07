@@ -127,12 +127,14 @@ class AccountConfig(BaseModel):
     :ivar name: 账号显示名称
     :ivar enabled: 是否启用
     :ivar role: 角色（scraper / dispatcher）
+    :ivar daily_limit: 每日投递上限
     """
 
     id: str = ""
     name: str = ""
     enabled: bool = True
     role: str = "dispatcher"
+    daily_limit: int = 150
 
 
 class AppConfig(BaseModel):
@@ -212,12 +214,14 @@ id = "main"
 name = "主账号"
 enabled = true
 role = "scraper"
+daily_limit = 150
 
 [[accounts]]
 id = "sub_1"
 name = "子账号1"
 enabled = true
 role = "dispatcher"
+daily_limit = 150
 """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(template.strip() + "\n", encoding="utf-8")

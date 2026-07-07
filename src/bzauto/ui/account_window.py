@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -114,7 +115,7 @@ class AccountWindow(QWidget):
 
             doc = self._storage.get_account(acc.id)
             dc = doc.daily_count if doc else 0
-            dl = doc.daily_limit if doc else 150
+            dl = acc.daily_limit
             table.setItem(i, 3, QTableWidgetItem(f"{dc} / {dl}"))
 
             enabled_item = QTableWidgetItem("是" if acc.enabled else "否")
@@ -151,6 +152,11 @@ class AccountWindow(QWidget):
         form.addRow("ID", edit_id)
         form.addRow("名称", edit_name)
         form.addRow("角色 (scraper/dispatcher)", edit_role)
+        spin_limit = QSpinBox()
+        spin_limit.setRange(1, 500)
+        spin_limit.setValue(150)
+        spin_limit.setSuffix(" 次/天")
+        form.addRow("每日上限", spin_limit)
 
         btn_layout = QHBoxLayout()
         btn_ok = QPushButton("确定")
@@ -177,6 +183,7 @@ class AccountWindow(QWidget):
             name=raw_name or raw_id,
             role=raw_role or "dispatcher",
             enabled=True,
+            daily_limit=spin_limit.value(),
         ))
         save_config(cfg)
         reload_config()
@@ -184,6 +191,7 @@ class AccountWindow(QWidget):
         bm = get_browser_manager()
         if bm:
             bm.add_account({"id": raw_id, "name": raw_name or raw_id})
+        self._storage.set_account_daily_limit(raw_id, spin_limit.value())
         self.refresh()
 
     def _edit(self, row: int):
@@ -203,6 +211,11 @@ class AccountWindow(QWidget):
         form.addRow("名称", edit_name)
         form.addRow("角色", edit_role)
         form.addRow("启用", edit_enabled)
+        spin_limit = QSpinBox()
+        spin_limit.setRange(1, 500)
+        spin_limit.setValue(acc.daily_limit)
+        spin_limit.setSuffix(" 次/天")
+        form.addRow("每日上限", spin_limit)
 
         btn_layout = QHBoxLayout()
         btn_ok = QPushButton("确定")
@@ -224,6 +237,7 @@ class AccountWindow(QWidget):
 
         cfg.accounts[idx].name = edit_name.text().strip() or acc.id
         cfg.accounts[idx].role = edit_role.text().strip() or "dispatcher"
+        cfg.accounts[idx].daily_limit = spin_limit.value()
         enabled_text = edit_enabled.text().strip()
         if enabled_text in ("是", "yes", "true"):
             cfg.accounts[idx].enabled = True
@@ -233,6 +247,7 @@ class AccountWindow(QWidget):
         save_config(cfg)
         reload_config()
         self._sync_manager(acc.id)
+        self._storage.set_account_daily_limit(acc.id, spin_limit.value())
         self.refresh()
 
     def _delete(self, row: int):

@@ -445,7 +445,7 @@ class Storage:
                 account_id=acc_cfg.id,
                 name=acc_cfg.name,
                 daily_count=daily_count,
-                daily_limit=150,
+                daily_limit=acc_cfg.daily_limit,
                 last_reset_date=_today_str(),
                 enabled=True,
                 role=acc_cfg.role,
@@ -487,7 +487,7 @@ class Storage:
             name = account_id
             for a in cfg_accounts:
                 if a.id == account_id:
-                    limit = 150
+                    limit = a.daily_limit
                     name = a.name
                     break
             self._accounts.insert({
