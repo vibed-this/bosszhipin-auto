@@ -63,7 +63,7 @@ class DebugWindow(QWidget):
         task_box = QGroupBox("单账号任务 (使用上方选中的账号)")
         task_layout = QHBoxLayout(task_box)
         self._task_buttons: dict[str, QPushButton] = {}
-        for name in ("采集", "投递", "扫描", "聊天爬取", "删拒"):
+        for name in ("采集", "投递", "消息扫描", "消息删拒"):
             btn = QPushButton(name)
             btn.setFixedHeight(28)
             btn.clicked.connect(lambda _, n=name: self._on_single_task(n))
@@ -74,7 +74,7 @@ class DebugWindow(QWidget):
         # ── 完整定时触发按钮 ──
         trigger_box = QGroupBox("完整定时触发 (全部账号 + 合并通知)")
         trigger_layout = QHBoxLayout(trigger_box)
-        for name in ("触发采集", "触发投递", "触发扫描"):
+        for name in ("触发采集", "触发投递", "触发消息扫描", "触发消息删拒"):
             btn = QPushButton(name)
             btn.setFixedHeight(28)
             trigger_name = name[2:]

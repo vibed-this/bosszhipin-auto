@@ -25,7 +25,6 @@ from bzauto.scheduler import (
     BzScheduler,
     DeleteChatTask,
     DispatchTask,
-    ScanTask,
     ScrapeChatTask,
     ScrapeManualTask,
     ScrapeTask,
@@ -356,9 +355,8 @@ class BzAutoApp:
         mapping = {
             "采集": ScrapeManualTask(account_id, storage),
             "投递": DispatchTask(account_id, storage, get_config().schedule.dispatch_batch_size),
-            "扫描": ScanTask(account_id, storage),
-            "聊天爬取": ScrapeChatTask(account_id, storage),
-            "删拒": DeleteChatTask(account_id, storage),
+            "消息扫描": ScrapeChatTask(account_id, storage),
+            "消息删拒": DeleteChatTask(account_id, storage),
         }
         return mapping[task_name]
 
@@ -396,7 +394,8 @@ class BzAutoApp:
             trigger_map = {
                 "采集": self._scheduler._trigger_scrape,
                 "投递": self._scheduler._trigger_dispatch,
-                "扫描": self._scheduler._trigger_scan,
+                "消息扫描": self._scheduler._trigger_scrape_chat,
+                "消息删拒": self._scheduler._trigger_delete_chat,
             }
             await asyncio.wait_for(trigger_map[trigger_name](), timeout=timeout)
             elapsed = time.monotonic() - start

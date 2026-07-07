@@ -44,15 +44,15 @@ class ControlPanel(QWidget):
 
         layout.addSpacing(4)
 
-        # Button: 聊天爬取
+        # Button: 消息扫描
         layout.addSpacing(2)
-        self.btn_scrape_chat = QPushButton("聊天爬取")
+        self.btn_scrape_chat = QPushButton("消息扫描")
         self.btn_scrape_chat.setFixedHeight(28)
         layout.addWidget(self.btn_scrape_chat)
 
-        # Button: 聊天删拒
+        # Button: 消息删拒
         layout.addSpacing(2)
-        self.btn_delete_chat = QPushButton("聊天删拒")
+        self.btn_delete_chat = QPushButton("消息删拒")
         self.btn_delete_chat.setFixedHeight(28)
         layout.addWidget(self.btn_delete_chat)
 

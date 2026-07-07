@@ -23,7 +23,7 @@ def format_task_lines(task_name: str, result: dict[str, Any] | list) -> list[str
         failed = result.get("failed", 0)
         return [f"投递 {success + failed} 个 (成功 {success}, 失败 {failed})"]
 
-    if task_name in ("扫描", "聊天爬取"):
+    if task_name in ("扫描", "聊天爬取", "消息扫描"):
         items = result if isinstance(result, dict) else {}
         lines = []
         new_conv = items.get("new", 0)
@@ -42,7 +42,7 @@ def format_task_lines(task_name: str, result: dict[str, Any] | list) -> list[str
             lines.append(f"未读 {len(unread)} 条")
         return lines or ["已完成"]
 
-    if task_name == "删拒":
+    if task_name in ("删拒", "消息删拒"):
         n = result.get("deleted", 0) if isinstance(result, dict) else len(result) if isinstance(result, list) else 0
         return [f"删除 {n} 条"]
 

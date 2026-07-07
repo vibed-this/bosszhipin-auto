@@ -98,9 +98,12 @@ class ConfigDialog(QDialog):
         self._spin_scan_interval = QSpinBox()
         self._spin_scan_interval.setRange(1, 1440)
         self._spin_scan_interval.setSuffix(" 分钟")
+        self._edit_delete_chat_time = QLineEdit()
+        self._edit_delete_chat_time.setPlaceholderText("03:00")
         layout.addRow("投递时间", self._edit_dispatch_times)
         layout.addRow("批量大小", self._spin_batch_size)
-        layout.addRow("扫描间隔", self._spin_scan_interval)
+        layout.addRow("消息扫描间隔", self._spin_scan_interval)
+        layout.addRow("消息删拒时间", self._edit_delete_chat_time)
 
     def _build_notify_tab(self):
         layout = QFormLayout(self._tab_notify)
@@ -145,6 +148,7 @@ class ConfigDialog(QDialog):
         self._edit_dispatch_times.setText(", ".join(cfg.schedule.dispatch_times))
         self._spin_batch_size.setValue(cfg.schedule.dispatch_batch_size)
         self._spin_scan_interval.setValue(cfg.schedule.scan_interval_minutes)
+        self._edit_delete_chat_time.setText(cfg.schedule.delete_chat_time)
         self._check_enabled.setChecked(cfg.notification.enabled)
         self._check_merge.setChecked(cfg.notification.merge)
         self._edit_base_url.setText(cfg.notification.napcat.base_url)
@@ -166,6 +170,9 @@ class ConfigDialog(QDialog):
             cfg.schedule.dispatch_times = times
         cfg.schedule.dispatch_batch_size = self._spin_batch_size.value()
         cfg.schedule.scan_interval_minutes = self._spin_scan_interval.value()
+        t = self._edit_delete_chat_time.text().strip()
+        if t:
+            cfg.schedule.delete_chat_time = t
         cfg.notification.enabled = self._check_enabled.isChecked()
         cfg.notification.merge = self._check_merge.isChecked()
         cfg.notification.napcat.base_url = self._edit_base_url.text()

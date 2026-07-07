@@ -1,8 +1,9 @@
 from bzauto.flows.base import BaseFlow
+from bzauto.flows.delete_chat import BossDeleteChatFlow
+from bzauto.flows.scan import ChatScanFlow
+from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.flows.scrape_manual import BossScrapeManualFlow
 from bzauto.flows.scrape_scheduled import BossScrapeScheduledFlow
-from bzauto.flows.scrape_chat import BossScrapeChatFlow
-from bzauto.flows.delete_chat import BossDeleteChatFlow
 
 __all__ = [
     "BaseFlow",
@@ -10,4 +11,5 @@ __all__ = [
     "BossScrapeScheduledFlow",
     "BossScrapeChatFlow",
     "BossDeleteChatFlow",
+    "ChatScanFlow",
 ]

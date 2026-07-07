@@ -16,7 +16,7 @@ from bzauto.config import get_config
 from bzauto.browser import get_browser_manager
 from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.flows.dispatch import DispatchFlow
-from bzauto.flows.scan import ScanFlow
+from bzauto.flows.scan import ChatScanFlow
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.flows.scrape_scheduled import BossScrapeScheduledFlow
 from bzauto.notify import NotificationAggregator, format_task_lines, get_notifier
@@ -102,7 +102,7 @@ class DispatchTask(ScheduledTask):
 
 
 class ScrapeChatTask(ScheduledTask):
-    name = "聊天爬取"
+    name = "消息扫描"
 
     def __init__(self, account_id: str, storage: Storage) -> None:
         self._account_id = account_id
@@ -117,7 +117,7 @@ class ScrapeChatTask(ScheduledTask):
 
 
 class DeleteChatTask(ScheduledTask):
-    name = "删拒"
+    name = "消息删拒"
 
     def __init__(self, account_id: str, storage: Storage) -> None:
         self._account_id = account_id
@@ -130,20 +130,6 @@ class DeleteChatTask(ScheduledTask):
         flow = BossDeleteChatFlow(page, session, self._account_id, self._storage)
         return {"deleted": len(await flow.run(dry_run=False))}
 
-
-class ScanTask(ScheduledTask):
-    name = "扫描"
-
-    def __init__(self, account_id: str, storage: Storage) -> None:
-        self._account_id = account_id
-        self._storage = storage
-
-    async def execute(self) -> dict[str, Any]:
-        bm = get_browser_manager()
-        session = bm.get_session(self._account_id)
-        page = BossChatListPage(session)
-        flow = ScanFlow(page, session, self._account_id, self._storage)
-        return await flow.run()
 
 
 class BzScheduler:
@@ -171,7 +157,7 @@ class BzScheduler:
                 **parse_cron_time(t), **kwargs,
             )
 
-        nxt = self._load_next_run("scan")
+        nxt = self._load_next_run("scrape_chat")
         kwargs = dict(
             misfire_grace_time=_MISFIRE_GRACE,
             coalesce=True,
@@ -179,8 +165,20 @@ class BzScheduler:
         if nxt is not None:
             kwargs["next_run_time"] = nxt
         self._scheduler.add_job(
-            self._trigger_scan, 'interval', id="scan",
+            self._trigger_scrape_chat, 'interval', id="scrape_chat",
             minutes=cfg.scan_interval_minutes, **kwargs,
+        )
+
+        nxt = self._load_next_run("delete_chat")
+        kwargs = dict(
+            misfire_grace_time=_MISFIRE_GRACE,
+            coalesce=True,
+        )
+        if nxt is not None:
+            kwargs["next_run_time"] = nxt
+        self._scheduler.add_job(
+            self._trigger_delete_chat, 'cron', id="delete_chat",
+            **parse_cron_time(cfg.delete_chat_time), **kwargs,
         )
 
         self._scheduler.add_listener(
@@ -203,7 +201,8 @@ class BzScheduler:
 
     _JOB_LABEL_MAP: dict[str, str] = {
         "_trigger_dispatch": "投递",
-        "_trigger_scan": "扫描",
+        "_trigger_scrape_chat": "消息扫描",
+        "_trigger_delete_chat": "消息删拒",
         "_trigger_scrape": "采集",
     }
 
@@ -322,13 +321,22 @@ class BzScheduler:
             agg.add_section(acc.name or acc.account_id, format_task_lines("采集", result))
         await agg.flush()
 
-    async def _trigger_scan(self) -> None:
+    async def _trigger_scrape_chat(self) -> None:
         accounts = self._storage.get_enabled_accounts()
         agg = NotificationAggregator(get_notifier(), f"消息扫描 {datetime.datetime.now():%m-%d %H:%M}")
         for acc in accounts:
-            task = ScanTask(acc.account_id, self._storage)
-            result = await self._run_and_record("扫描", acc, task)
-            agg.add_section(acc.name or acc.account_id, format_task_lines("扫描", result))
+            task = ScrapeChatTask(acc.account_id, self._storage)
+            result = await self._run_and_record("消息扫描", acc, task)
+            agg.add_section(acc.name or acc.account_id, format_task_lines("消息扫描", result))
+        await agg.flush()
+
+    async def _trigger_delete_chat(self) -> None:
+        accounts = self._storage.get_enabled_accounts()
+        agg = NotificationAggregator(get_notifier(), f"消息删拒 {datetime.datetime.now():%m-%d %H:%M}")
+        for acc in accounts:
+            task = DeleteChatTask(acc.account_id, self._storage)
+            result = await self._run_and_record("消息删拒", acc, task)
+            agg.add_section(acc.name or acc.account_id, format_task_lines("消息删拒", result))
         await agg.flush()
 
 

@@ -79,7 +79,8 @@ class ScheduleConfig(BaseModel):
     :ivar dispatch_times: 投递触发时间列表 (HH:MM)
     :ivar dispatch_batch_size: 每批投递数量上限
     :ivar scrape_threshold: 投递前触发采集的 pending 数量下限
-    :ivar scan_interval_minutes: 扫描间隔（分钟）
+    :ivar scan_interval_minutes: 消息扫描间隔（分钟）
+    :ivar delete_chat_time: 消息删拒每天执行时间 (HH:MM)
     :ivar claim_timeout_minutes: claim 超时释放（分钟）
     """
 
@@ -87,6 +88,7 @@ class ScheduleConfig(BaseModel):
     dispatch_batch_size: int = 50
     scrape_threshold: int = 50
     scan_interval_minutes: int = 15
+    delete_chat_time: str = "20:00"
     claim_timeout_minutes: int = 30
 
 
@@ -191,7 +193,8 @@ days_threshold = 50
 dispatch_times = ["09:00", "14:00", "19:00"]
 dispatch_batch_size = 50
 scrape_threshold = 50
-scan_interval_minutes = 60
+scan_interval_minutes = 15
+delete_chat_time = "03:00"
 claim_timeout_minutes = 30
 
 [notification]
