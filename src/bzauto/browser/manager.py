@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal, QEvent
 from PySide6.QtGui import QShowEvent, QWindowStateChangeEvent
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -76,6 +76,7 @@ class BrowserManager(QMainWindow):
     """主窗口 — QTabWidget + 每账号独立 Profile/View/Page。"""
 
     windowStateChanged = Signal(object)
+    windowActivated = Signal(bool)
 
     def __init__(self, accounts: list[dict[str, Any]],
                  profiles_dir: str = _PROFILES_DIR) -> None:
@@ -103,7 +104,10 @@ class BrowserManager(QMainWindow):
 
     def changeEvent(self, event: QWindowStateChangeEvent) -> None:
         super().changeEvent(event)
-        self.windowStateChanged.emit(self.windowState())
+        if event.type() == QEvent.Type.WindowStateChange:
+            self.windowStateChanged.emit(self.windowState())
+        elif event.type() == QEvent.Type.ActivationChange:
+            self.windowActivated.emit(self.isActiveWindow())
 
     def _add_account_tab(self, acc: dict[str, Any]) -> None:
         account_id: str = acc["id"]

@@ -147,6 +147,8 @@ class BzAutoApp:
 
         # 控制台/日志窗口随浏览器窗口最小化/恢复
         self._manager.windowStateChanged.connect(self._on_manager_window_state_changed)
+        # 控制台/日志窗口随浏览器窗口激活/失焦
+        self._manager.windowActivated.connect(self._on_manager_window_activated)
 
     def _on_manager_window_state_changed(self, state: Qt.WindowState) -> None:
         if state & Qt.WindowState.WindowMinimized:
@@ -155,6 +157,13 @@ class BzAutoApp:
         else:
             self._control.show()
             self._log_win.show()
+
+    def _on_manager_window_activated(self, active: bool) -> None:
+        if active:
+            self._control.raise_()
+            self._control.activateWindow()
+            self._log_win.raise_()
+            self._log_win.activateWindow()
 
     async def _async_stop(self) -> None:
         """协程版停止（被 keyboard 线程调用）。"""

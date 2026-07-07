@@ -20,10 +20,7 @@ class ControlPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("控制台")
-        self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
+        self.setWindowFlags(Qt.WindowType.Tool)
         self.setFont(QFont("Microsoft YaHei", 9))
 
         layout = QVBoxLayout(self)

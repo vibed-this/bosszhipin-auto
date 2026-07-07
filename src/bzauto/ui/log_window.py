@@ -18,10 +18,7 @@ class LogWindow(QWidget):
         super().__init__(parent)
         self.log_message.connect(self._append)
         self.setWindowTitle("Boss直聘 - 日志")
-        self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.Tool
-        )
+        self.setWindowFlags(Qt.WindowType.Tool)
         self.resize(400, 300)
 
         layout = QVBoxLayout(self)
