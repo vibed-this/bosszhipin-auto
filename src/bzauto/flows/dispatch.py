@@ -60,12 +60,11 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 await self._page.click_card_at(idx)
                 await self._page.click_chat(idx)
 
-                # === 新流程：无打招呼语（平台侧未设置）→ 自动跳转聊天页 ===
+                # === 新流程：自动跳转聊天页 → 发送招呼语 ===
                 greeting = get_config().scrape.greeting
                 await self._chat_page.wait_conversation_selected(timeout=10)
-                if greeting:
-                    await self._chat_page.send_message(greeting)
-                    log.info("已发送招呼语: %s — %s", job.title, job.company)
+                await self._chat_page.send_message(greeting)
+                log.info("已发送招呼语: %s — %s", job.title, job.company)
 
                 # === 旧流程：有打招呼语（平台侧已设置）→ 弹窗确认 ===
                 # await asyncio.sleep(random.uniform(1.0, 2.0))

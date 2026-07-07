@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -79,8 +80,9 @@ class ConfigDialog(QDialog):
         self._spin_max_salary = QSpinBox()
         self._spin_max_salary.setRange(0, 100)
         self._edit_greeting = QPlainTextEdit()
-        self._edit_greeting.setPlaceholderText("留空 = 不发送招呼语，非空 = 自动跳转聊天页并发送此消息")
+        self._edit_greeting.setPlaceholderText("必填。自动跳转聊天页并发送此消息")
         self._edit_greeting.setMaximumHeight(80)
+        self._edit_greeting.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addRow("白名单（逗号分隔）", self._edit_whitelist)
         layout.addRow("黑名单（逗号分隔）", self._edit_blacklist)
         layout.addRow("薪资下限 (K)", self._spin_min_salary)
@@ -176,6 +178,11 @@ class ConfigDialog(QDialog):
         return cfg
 
     def _on_save(self):
+        greeting = self._edit_greeting.toPlainText().strip()
+        if not greeting:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "必填项", "打招呼语不能为空，请填写后再保存")
+            return
         cfg = self._collect_config()
         save_config(cfg)
         reload_config()

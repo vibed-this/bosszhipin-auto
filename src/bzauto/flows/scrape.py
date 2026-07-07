@@ -102,11 +102,10 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
 
             await self._page.click_chat(idx)
 
-            # === 新流程：无打招呼语（平台侧未设置）→ 自动跳转聊天页 ===
+            # === 新流程：自动跳转聊天页 → 发送招呼语 ===
             await self._chat_page.wait_conversation_selected(timeout=10)
-            if self._greeting:
-                await self._chat_page.send_message(self._greeting)
-                log.info("已发送招呼语: %s — %s", card.title, card.company)
+            await self._chat_page.send_message(self._greeting)
+            log.info("已发送招呼语: %s — %s", card.title, card.company)
 
             # 跳回列表页，继续下一个卡片
             await self._session.ensure_tab(self._jobs_url, reuse_existing=True)
