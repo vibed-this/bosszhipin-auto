@@ -10,7 +10,7 @@ QWebEngineView 桌面浏览器自动控制，支持多账号独立 Profile、JS 
 ```
 ├── config.toml                   # 配置文件（TOML）
 ├── data/
-│   └── bzauto.tinydb             # TinyDB 数据库文件
+│   └── bzauto.db                 # SQLite 数据库文件
 ├── profiles/                     # 每账号 QWebEngineProfile 持久化目录
 ├── test.py                       # Qt 事件模拟原型（参考）
 ├── src/
@@ -163,22 +163,36 @@ view = bm.get_view("main")
 from bzauto.storage import Storage
 store = Storage()
 
-store.upsert_job(job_dict)
-store.get_pending_jobs(limit=50)
-store.claim_job(job_id, account_id)
-store.mark_job_success(job_id)
-store.release_stale_claims(timeout_minutes=30)
+# 仓库模式：store.<repo>.<method>()
+store.jobs.upsert(doc)
+store.jobs.list(dispatch_status="pending", limit=50)
+store.jobs.claim(job_id, account_id)
+store.jobs.mark_success(job_id)
+store.jobs.release_stale_claims(timeout_minutes=30)
 
-store.upsert_conversation(conv_dict)
-store.search_conversations(keyword="", status="", account="")
+store.conversations.upsert(doc)
+store.conversations.list(keyword="", status="", account="")
+store.conversations.batch_upsert(account_id, items)
 
-store.get_enabled_accounts()
-store.increment_daily_count(account_id)
-store.get_remaining_quota(account_id)
-store.reset_daily_counts_if_new_day()
+store.accounts.list(enabled_only=True)
+store.accounts.increment_daily_count(account_id)
+store.accounts.get_remaining_quota(account_id)
+store.accounts.reset_daily_counts_if_new_day()
 
-store.get_seen_job_hrefs()
-store.add_seen_job_hrefs(["href1", "href2"])
+store.seen_hrefs.get_all()
+store.seen_hrefs.add(["href1", "href2"])
+
+store.meta.get(key, default)
+store.meta.set(key, value)
+
+store.runs.insert(doc)
+store.runs.list_recent(limit=50)
+
+# 显式事务
+with store.transaction():
+    store.jobs.claim(job_id, account_id)
+    store.jobs.mark_success(job_id)
+    store.accounts.increment_daily_count(account_id)
 ```
 
 ## TaskRunner + Scheduler
@@ -233,7 +247,7 @@ result = await flow.run()
 | `pyside6` | Qt WebEngine 浏览器 + 桌面 UI |
 | `qasync` | Qt + asyncio 统一事件循环 |
 | `keyboard` | 全局热键（自起线程 → run_coroutine_threadsafe 投递） |
-| `tinydb` | JSON 文件数据库 |
+| `sqlite-utils` | SQLite 数据库工具库 |
 | `apscheduler` | 定时调度 |
 | `httpx` | 通知 HTTP 客户端 |
 | `tomli_w` | TOML 写入 |

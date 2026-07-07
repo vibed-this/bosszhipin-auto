@@ -25,12 +25,12 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
         self._chat_page = BossChatListPage(session)
 
     async def run(self, batch_size: int = 50) -> DispatchResult:
-        remaining = self._storage.get_remaining_quota(self._account_id)
+        remaining = self._storage.accounts.get_remaining_quota(self._account_id)
         if remaining <= 0:
             log.info("配额已满: account=%s", self._account_id)
             return DispatchResult(success=0, failed=0, skipped=True)
 
-        jobs = self._storage.get_pending_jobs(min(remaining, batch_size))
+        jobs = self._storage.jobs.list(dispatch_status="pending", limit=min(remaining, batch_size))
         if not jobs:
             log.info("无待办 job，跳过投递: account=%s", self._account_id)
             return DispatchResult(success=0, failed=0, skipped=True)
@@ -44,7 +44,7 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
 
         for job in jobs:
             job_id = job.job_id
-            claimed = self._storage.claim_job(job_id, self._account_id)
+            claimed = self._storage.jobs.claim(job_id, self._account_id)
             if not claimed:
                 log.debug("job 已被领取: %s", job_id)
                 continue
@@ -60,8 +60,8 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 dialog_result = await self._page.dismiss_dialogs()
                 if not dialog_result:
                     log.warning("沟通上限已达，终止投递")
-                    self._storage.mark_job_failed(job_id)
-                    self._storage.set_daily_count_maxed(self._account_id)
+                    self._storage.jobs.mark_failed(job_id)
+                    self._storage.accounts.set_daily_count_maxed(self._account_id)
                     failed += 1
                     break
 
@@ -70,12 +70,12 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 await self._chat_page.send_message(greeting)
                 log.info("已发送招呼语: %s — %s", job.title, job.company)
 
-                self._storage.mark_job_success(job_id)
-                self._storage.increment_daily_count(self._account_id)
+                self._storage.jobs.mark_success(job_id)
+                self._storage.accounts.increment_daily_count(self._account_id)
                 success += 1
                 log.info("投递成功: %s — %s", job.title, job.company)
 
-                remaining = self._storage.get_remaining_quota(self._account_id)
+                remaining = self._storage.accounts.get_remaining_quota(self._account_id)
                 if remaining <= 0:
                     log.info("配额已满，终止投递")
                     break
@@ -84,7 +84,7 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
 
             except Exception as e:
                 log.error("投递异常: job=%s error=%s", job_id, e)
-                self._storage.mark_job_failed(job_id)
+                self._storage.jobs.mark_failed(job_id)
                 failed += 1
 
         log.info("投递完成: account=%s success=%d failed=%d", self._account_id, success, failed)

@@ -31,7 +31,7 @@ class BossScrapeScheduledFlow:
         enabled_count = sum(1 for a in cfg.accounts if a.enabled)
         target = enabled_count * 150
 
-        pending = self._storage.count_pending_jobs()
+        pending = self._storage.jobs.count(dispatch_status="pending")
         log.info("定时采集检查: pending=%d target=%d", pending, target)
 
         if pending >= target:

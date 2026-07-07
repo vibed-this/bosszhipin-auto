@@ -366,8 +366,8 @@ class BzAutoApp:
                     lines.append("\n已加载账号: 无")
         except Exception:
             lines.append("\n已加载账号: 获取失败")
-        for acc in self._storage.get_enabled_accounts():
-            remaining = self._storage.get_remaining_quota(acc.account_id)
+        for acc in self._storage.accounts.list(enabled_only=True):
+            remaining = self._storage.accounts.get_remaining_quota(acc.account_id)
             lines.append(f"  {acc.name or acc.account_id}: 剩余 {remaining}")
         return "\n".join(lines)
 
@@ -447,9 +447,9 @@ class BzAutoApp:
         self._scheduler = BzScheduler(self._task_runner, self._loop, self._storage)
 
         # 启动时维护
-        self._storage.release_stale_claims()
-        self._storage.reset_daily_counts_if_new_day()
-        self._storage.purge_old_runs(30)
+        self._storage.jobs.release_stale_claims()
+        self._storage.accounts.reset_daily_counts_if_new_day()
+        self._storage.runs.purge_old(30)
         self._scheduler.start()
         log.info("系统启动完成: 调度器已运行")
 

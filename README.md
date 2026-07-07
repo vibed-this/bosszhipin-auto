@@ -39,4 +39,4 @@ uv sync
 
 ## 依赖
 
-`pyside6`、`qasync`、`tinydb`、`apscheduler`、`httpx`、`keyboard`
+`pyside6`、`qasync`、`sqlite-utils`、`apscheduler`、`httpx`、`keyboard`

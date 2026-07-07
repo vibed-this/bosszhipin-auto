@@ -97,8 +97,8 @@ class DispatchTask(ScheduledTask):
     async def execute(self) -> DispatchResult:
         cfg = get_config()
         sched_cfg = cfg.schedule
-        self._storage.release_stale_claims(sched_cfg.claim_timeout_minutes)
-        remaining = self._storage.get_remaining_quota(self._account_id)
+        self._storage.jobs.release_stale_claims(sched_cfg.claim_timeout_minutes)
+        remaining = self._storage.accounts.get_remaining_quota(self._account_id)
         if remaining <= 0:
             return DispatchResult(success=0, failed=0, skipped=True, skip_reason="配额已满")
 
@@ -291,7 +291,7 @@ class BzScheduler:
         return results
 
     def _load_next_run(self, job_id: str) -> datetime.datetime | None:
-        val = self._storage.get_meta(f"next_run:{job_id}")
+        val = self._storage.meta.get(f"next_run:{job_id}")
         try:
             return datetime.datetime.fromisoformat(val) if val else None
         except (ValueError, TypeError):
@@ -299,7 +299,7 @@ class BzScheduler:
 
     def _persist_next_run(self, job) -> None:
         if job and job.next_run_time:
-            self._storage.set_meta(f"next_run:{job.id}", job.next_run_time.isoformat())
+            self._storage.meta.set(f"next_run:{job.id}", job.next_run_time.isoformat())
 
     def _on_job_event(self, event) -> None:
         self._persist_next_run(self._scheduler.get_job(event.job_id))
@@ -340,7 +340,7 @@ class BzScheduler:
             log.error("[%s] %s 异常: %s", trigger, acc.name or acc.account_id, error)
             raise
         finally:
-            self._storage.insert_run(RunDoc(
+                self._storage.runs.insert(RunDoc(
                 trigger=trigger,
                 account_id=acc.account_id,
                 account_name=acc.name or acc.account_id,
@@ -353,12 +353,12 @@ class BzScheduler:
 
     async def _trigger_dispatch(self) -> None:
         cfg = get_config().schedule
-        accounts = self._storage.get_enabled_accounts()
+        accounts = self._storage.accounts.list(enabled_only=True)
         agg = NotificationAggregator(get_notifier(), f"投递报告 {datetime.datetime.now():%m-%d %H:%M}")
         total_dispatched = 0
         for acc in accounts:
             if total_dispatched >= cfg.dispatch_total_limit:
-                self._storage.insert_run(RunDoc(
+                self._storage.runs.insert(RunDoc(
                     trigger="投递",
                     account_id=acc.account_id,
                     account_name=acc.name or acc.account_id,
@@ -394,7 +394,7 @@ class BzScheduler:
         await agg.flush()
 
     async def _trigger_scrape(self) -> None:
-        accounts = self._storage.get_enabled_accounts()
+        accounts = self._storage.accounts.list(enabled_only=True)
         agg = NotificationAggregator(get_notifier(), f"采集报告 {datetime.datetime.now():%m-%d %H:%M}")
         for acc in accounts:
             task = ScrapeTask(acc.account_id, self._storage)
@@ -403,7 +403,7 @@ class BzScheduler:
         await agg.flush()
 
     async def _trigger_scrape_chat(self) -> None:
-        accounts = self._storage.get_enabled_accounts()
+        accounts = self._storage.accounts.list(enabled_only=True)
         agg = NotificationAggregator(get_notifier(), f"消息扫描 {datetime.datetime.now():%m-%d %H:%M}")
         any_update = False
         for acc in accounts:
@@ -422,7 +422,7 @@ class BzScheduler:
             log.info("[消息扫描] 全部账号无更新，跳过通知")
 
     async def _trigger_delete_chat(self) -> None:
-        accounts = self._storage.get_enabled_accounts()
+        accounts = self._storage.accounts.list(enabled_only=True)
         agg = NotificationAggregator(get_notifier(), f"消息删拒 {datetime.datetime.now():%m-%d %H:%M}")
         for acc in accounts:
             task = DeleteChatTask(acc.account_id, self._storage)

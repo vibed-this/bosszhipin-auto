@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+import json
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from bzauto.enums import ConvStatus, DispatchStatus, RunStatus
 
@@ -52,6 +54,18 @@ class JobDoc(BaseModel):
     last_updated: str = ""
     job_desc: str = ""
     note: str = ""
+
+    @field_validator("location", mode="before")
+    @classmethod
+    def _parse_location(cls, v: object) -> object:
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return v
 
 
 class ConvDoc(BaseModel):
@@ -127,6 +141,7 @@ class AccountDoc(BaseModel):
 class RunDoc(BaseModel):
     """schedule_runs 表的文档模型 — 记录每次调度/手动触发的执行结果。
 
+    :ivar id: 自增主键（SQLite 回填，回滚时可用）
     :ivar trigger: 触发类型（采集 / 投递 / 扫描）
     :ivar account_id: 账号 ID
     :ivar account_name: 账号显示名称（冗余存储，面板免二次查询）
@@ -139,6 +154,7 @@ class RunDoc(BaseModel):
 
     model_config = ConfigDict(use_enum_values=True)
 
+    id: int | None = None
     trigger: str = ""
     account_id: str = ""
     account_name: str = ""
@@ -147,3 +163,16 @@ class RunDoc(BaseModel):
     status: str = RunStatus.SUCCESS
     result: dict = {}
     error: str = ""
+
+    @field_validator("result", mode="before")
+    @classmethod
+    def _parse_result(cls, v: object) -> object:
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return v if isinstance(v, dict) else {}
+
+
+

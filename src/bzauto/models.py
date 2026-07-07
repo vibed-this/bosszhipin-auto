@@ -5,9 +5,10 @@ from __future__ import annotations
 import datetime
 import hashlib
 import re
-from dataclasses import asdict, dataclass
 from typing import Any
 import logging
+
+from pydantic import BaseModel, ConfigDict
 
 from bzauto.enums import ConvStatus, MsgType
 from bzauto.models_doc import ConvDoc, JobDoc
@@ -122,8 +123,8 @@ def parse_chat_time(time_text: str) -> str:
     return t
 
 
-@dataclass(frozen=True)
-class JobCard:
+class JobCard(BaseModel):
+    model_config = ConfigDict(frozen=True)
     """职位卡片数据。
 
     :ivar title: 职位名称
@@ -156,7 +157,7 @@ class JobCard:
 
     def to_dict(self) -> dict[str, Any]:
         """转为普通 dict（序列化用）。"""
-        return asdict(self)
+        return self.model_dump()
 
     def to_doc(self, account_id: str = "") -> JobDoc:
         """转为 DB 文档模型。
@@ -180,8 +181,8 @@ class JobCard:
         )
 
 
-@dataclass(frozen=True)
-class ChatItem:
+class ChatItem(BaseModel):
+    model_config = ConfigDict(frozen=True)
     """聊天列表项数据。
 
     :ivar name: 招聘者姓名
@@ -287,7 +288,7 @@ class ChatItem:
 
     def to_dict(self) -> dict[str, Any]:
         """转为普通 dict（序列化用）。"""
-        return asdict(self)
+        return self.model_dump()
 
     def to_doc(self, account_id: str = "") -> ConvDoc:
         """转为 DB 文档模型。

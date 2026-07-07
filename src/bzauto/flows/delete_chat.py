@@ -49,7 +49,7 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
         db_targets: dict[str, str] = {}  # unique_id -> conv_id
         db_fallback_keys: set[tuple[str, str]] = set()  # (name, company) fallback
         if self._storage:
-            for conv in self._storage.get_conversations(account=self._account_id):
+            for conv in self._storage.conversations.list(account=self._account_id):
                 if classify_msg_type(conv.last_msg, conv.sender, conv.platform_status) is MsgType.REJECTION:
                     if conv.unique_id:
                         db_targets[conv.unique_id] = conv.conv_id
@@ -107,7 +107,7 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
                         from bzauto.models import make_conv_id
                         cid = make_conv_id(self._account_id, item.name, item.company)
                     if cid:
-                        self._storage.mark_deleted(cid, self._account_id)
+                        self._storage.conversations.mark_deleted(cid, self._account_id)
 
         log.info("完成: 共处理 %d 条", len(deleted))
         return deleted

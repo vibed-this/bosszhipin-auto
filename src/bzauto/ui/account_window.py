@@ -113,7 +113,7 @@ class AccountWindow(QWidget):
             table.setItem(i, 1, QTableWidgetItem(acc.name))
             table.setItem(i, 2, QTableWidgetItem(acc.role))
 
-            doc = self._storage.get_account(acc.id)
+            doc = self._storage.accounts.get(acc.id)
             dc = doc.daily_count if doc else 0
             dl = acc.daily_limit
             table.setItem(i, 3, QTableWidgetItem(f"{dc} / {dl}"))
@@ -191,7 +191,7 @@ class AccountWindow(QWidget):
         bm = get_browser_manager()
         if bm:
             bm.add_account({"id": raw_id, "name": raw_name or raw_id})
-        self._storage.set_account_daily_limit(raw_id, spin_limit.value())
+        self._storage.accounts.set_daily_limit(raw_id, spin_limit.value())
         self.refresh()
 
     def _edit(self, row: int):
@@ -247,7 +247,7 @@ class AccountWindow(QWidget):
         save_config(cfg)
         reload_config()
         self._sync_manager(acc.id)
-        self._storage.set_account_daily_limit(acc.id, spin_limit.value())
+        self._storage.accounts.set_daily_limit(acc.id, spin_limit.value())
         self.refresh()
 
     def _delete(self, row: int):

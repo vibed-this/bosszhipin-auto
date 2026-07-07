@@ -1,17 +1,24 @@
-"""TinyDB 封装 — jobs / conversations / accounts / meta 四张表。"""
+"""SQLite + sqlite-utils 持久化层 — 仓库模式。
+
+Storage 作为顶层入口，组合 6 个仓库（JobRepo / ConversationRepo / AccountRepo / RunRepo / MetaRepo / SeenHrefsRepo）。
+每个仓库持有对 sqlite_utils.Database 的引用，方法返回 Pydantic 模型实例。
+"""
 
 from __future__ import annotations
 
 import datetime
+import json
 import logging
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from tinydb import Query, TinyDB
+from sqlite_utils import Database
+from sqlite_utils.db import NotFoundError
 
 from bzauto.config import get_config
 from bzauto.enums import ConvStatus, DispatchStatus
-from bzauto.models import make_conv_id, make_job_id
+from bzauto.models import infer_status, make_conv_id, make_job_id
 from bzauto.models_doc import AccountDoc, ConvDoc, JobDoc, RunDoc
 
 log = logging.getLogger("boss.storage")
@@ -25,259 +32,179 @@ def _today_str() -> str:
     return datetime.date.today().isoformat()
 
 
-class Storage:
-    """TinyDB 持久化存储。
+# ──────────────────────────────────────────────
+#  Repos
+# ──────────────────────────────────────────────
 
-    :ivar _db: TinyDB 实例
-    :ivar _jobs: jobs 表
-    :ivar _conversations: conversations 表
-    :ivar _accounts: accounts 表
-    :ivar _meta: meta 表（键值存储）
-    """
 
-    def __init__(self, db_path: str | Path | None = None) -> None:
-        """初始化 Storage。
+class JobRepo:
+    """jobs 表仓库。"""
 
-        :param db_path: 数据库文件路径，None 则从配置读取
-        """
-        resolved: str | Path = db_path if db_path is not None else get_config().storage.db_path
-        path = Path(resolved)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = TinyDB(str(path), indent=2, ensure_ascii=False, sort_keys=True, encoding="utf-8")
-        self._jobs = self._db.table("jobs")
-        self._conversations = self._db.table("conversations")
-        self._accounts = self._db.table("accounts")
-        self._meta = self._db.table("meta")
-        self._runs = self._db.table("schedule_runs")
-        self._JobQ = Query()
-        self._ConvQ = Query()
-        self._AccountQ = Query()
-        self._MetaQ = Query()
-        self._RunQ = Query()
-        log.info("数据库初始化: %s", path)
+    def __init__(self, db: Database) -> None:
+        self.db = db
+        self.tbl = db["jobs"]
 
-    # ── Jobs ──
-
-    def upsert_job(self, doc: JobDoc) -> int:
-        """插入或更新一条职位记录。
-
-        :param doc: 职位文档
-        :returns: TinyDB doc_id
-        """
-        existing = self._jobs.get(self._JobQ.job_id == doc.job_id)
+    def upsert(self, doc: JobDoc) -> None:
+        """插入或更新。保留"空字符串字段不覆盖"语义。"""
         now = _now_iso()
+        try:
+            existing = self.tbl.get(doc.job_id)
+        except NotFoundError:
+            existing = None
         if existing:
             update_data = doc.model_dump(exclude={"job_id"}, exclude_none=True)
-            # 只更新非空字段（保持 DB 整洁）
             update_data = {k: v for k, v in update_data.items() if v != ""}
             update_data["last_updated"] = now
-            self._jobs.update(update_data, self._JobQ.job_id == doc.job_id)
-            log.debug("更新 job: %s", doc.job_id)
-            return existing.doc_id
+            if update_data:
+                self.tbl.update(doc.job_id, update_data)
         else:
             data = doc.model_dump(exclude_none=True)
             data["job_id"] = data.get("job_id") or make_job_id(doc.href)
             data.setdefault("last_updated", now)
-            doc_id = self._jobs.insert(data)
-            log.debug("插入 job: %s", doc.job_id)
-            return doc_id
+            self.tbl.insert(data)
 
-    def get_pending_jobs(self, limit: int = 50) -> list[JobDoc]:
-        """获取待派发职位列表。
+    def get(self, job_id: str) -> JobDoc | None:
+        try:
+            raw = self.tbl.get(job_id)
+        except NotFoundError:
+            return None
+        return JobDoc(**raw) if raw else None
 
-        :param limit: 最大返回条数
-        :returns: 待派发职位文档列表
-        """
-        results = self._jobs.search(self._JobQ.dispatch_status == DispatchStatus.PENDING)
-        return [JobDoc(**r) for r in results[:limit]]  # type: ignore[arg-type]
+    def list(self, *, keyword: str = "", status: str = "",
+             dispatch_status: str = "", limit: int = 0) -> list[JobDoc]:
+        where_clauses: list[str] = []
+        params: list[Any] = []
+        if keyword:
+            where_clauses.append("(LOWER(title) LIKE ? OR LOWER(company) LIKE ?)")
+            kw = f"%{keyword.lower()}%"
+            params.extend([kw, kw])
+        if status:
+            where_clauses.append("status = ?")
+            params.append(status)
+        if dispatch_status:
+            where_clauses.append("dispatch_status = ?")
+            params.append(dispatch_status)
+        sql = "SELECT * FROM jobs"
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+        sql += " ORDER BY last_updated DESC"
+        if limit:
+            sql += f" LIMIT {limit}"
+        rows = self.db.query(sql, params)
+        return [JobDoc(**r) for r in rows]
 
-    def count_jobs_today(self) -> int:
-        """统计今日更新的职位总数（近似今日采集/更新量）。
-
-        :returns: 当日更新职位数
-        """
-        today = _today_str()
-        return len(self._jobs.search(
-            self._JobQ.last_updated.test(lambda v: v.startswith(today) if v else False),
-        ))
-
-    def count_dispatched_today(self) -> int:
-        """统计今日成功投递的职位数。
-
-        :returns: 当日成功投递数
-        """
-        today = _today_str()
-        return len(self._jobs.search(
-            (self._JobQ.dispatch_status == DispatchStatus.SUCCESS) &
-            (self._JobQ.applied_at.test(lambda v: v.startswith(today) if v else False)),
-        ))
-
-    def count_pending_jobs(self) -> int:
-        """统计待派发职位数量。"""
-        return len(self._jobs.search(self._JobQ.dispatch_status == DispatchStatus.PENDING))
-
-    def get_job(self, job_id: str) -> JobDoc | None:
-        """按 job_id 查询职位。
-
-        :param job_id: 职位标识
-        :returns: 职位文档或 None
-        """
-        raw = self._jobs.get(self._JobQ.job_id == job_id)
-        return JobDoc(**raw) if raw else None  # type: ignore[arg-type]
-
-    def claim_job(self, job_id: str, account_id: str) -> bool:
-        """原子领取一个 job（仅 PENDING 状态可领取）。
-
-        :param job_id: 职位标识
-        :param account_id: 账号 ID
-        :returns: 是否领取成功
-        """
+    def claim(self, job_id: str, account_id: str) -> bool:
         now = _now_iso()
-        result = self._jobs.update(
-            {
-                "dispatch_status": DispatchStatus.CLAIMED,
-                "dispatched_by": account_id,
-                "dispatched_at": now,
-                "last_updated": now,
-            },
-            (self._JobQ.job_id == job_id) & (self._JobQ.dispatch_status == DispatchStatus.PENDING),
+        cursor = self.db.conn.execute(
+            "UPDATE jobs SET dispatch_status=?, dispatched_by=?, "
+            "dispatched_at=?, last_updated=? "
+            "WHERE job_id=? AND dispatch_status=?",
+            (DispatchStatus.CLAIMED, account_id, now, now, job_id, DispatchStatus.PENDING),
         )
-        claimed = len(result) > 0
+        claimed = cursor.rowcount > 0
         if claimed:
             log.info("领取 job: %s -> account=%s", job_id, account_id)
         return claimed
 
-    def mark_job_success(self, job_id: str) -> None:
-        """标记 job 沟通成功。
-
-        :param job_id: 职位标识
-        """
+    def mark_success(self, job_id: str) -> None:
         now = _now_iso()
-        self._jobs.update(
-            {
-                "dispatch_status": DispatchStatus.SUCCESS,
-                "status": "已沟通",
-                "applied_at": now,
-                "last_updated": now,
-            },
-            self._JobQ.job_id == job_id,
+        self.db.conn.execute(
+            "UPDATE jobs SET dispatch_status=?, status=?, applied_at=?, last_updated=? "
+            "WHERE job_id=?",
+            (DispatchStatus.SUCCESS, "已沟通", now, now, job_id),
         )
         log.debug("job 成功: %s", job_id)
 
-    def mark_job_failed(self, job_id: str) -> None:
-        """标记 job 沟通失败。
-
-        :param job_id: 职位标识
-        """
+    def mark_failed(self, job_id: str) -> None:
         now = _now_iso()
-        self._jobs.update(
-            {
-                "dispatch_status": DispatchStatus.FAILED,
-                "last_updated": now,
-            },
-            self._JobQ.job_id == job_id,
+        self.db.conn.execute(
+            "UPDATE jobs SET dispatch_status=?, last_updated=? WHERE job_id=?",
+            (DispatchStatus.FAILED, now, job_id),
         )
         log.debug("job 失败: %s", job_id)
 
-    def count_stale_claims(self, timeout_minutes: int = 30) -> int:
-        """统计超时未完成的 claim 数量（不释放）。
-
-        :param timeout_minutes: 超时分钟数
-        :returns: 超时 claim 数量
-        """
-        now = datetime.datetime.now()
-        count = 0
-        for doc in self._jobs.search(self._JobQ.dispatch_status == DispatchStatus.CLAIMED):
-            dispatched_str = doc.get("dispatched_at", "")
-            try:
-                dispatched = datetime.datetime.fromisoformat(dispatched_str)
-            except (ValueError, TypeError):
-                continue
-            if (now - dispatched).total_seconds() > timeout_minutes * 60:
-                count += 1
-        return count
-
     def release_stale_claims(self, timeout_minutes: int = 30) -> int:
-        """释放超时未完成的 claim。
-
-        :param timeout_minutes: 超时分钟数
-        :returns: 释放的 claim 数量
-        """
-        now = datetime.datetime.now()
-        count = 0
-        for doc in self._jobs.search(self._JobQ.dispatch_status == DispatchStatus.CLAIMED):
-            dispatched_str = doc.get("dispatched_at", "")
-            try:
-                dispatched = datetime.datetime.fromisoformat(dispatched_str)
-            except (ValueError, TypeError):
-                continue
-            if (now - dispatched).total_seconds() > timeout_minutes * 60:
-                self._jobs.update(
-                    {"dispatch_status": DispatchStatus.PENDING, "last_updated": _now_iso()},
-                    doc_ids=[doc.doc_id],
-                )
-                count += 1
+        now = _now_iso()
+        cursor = self.db.conn.execute(
+            "UPDATE jobs SET dispatch_status=?, last_updated=? "
+            "WHERE dispatch_status=? "
+            "AND datetime(dispatched_at) < datetime('now', ?)",
+            (DispatchStatus.PENDING, now, DispatchStatus.CLAIMED, f'-{timeout_minutes} minutes'),
+        )
+        count = cursor.rowcount
         if count:
             log.info("释放超时 claim: %d 条", count)
         return count
 
-    def update_job_status(self, job_id: str, status: str) -> None:
-        """更新职位的业务状态。
+    def count(self, *, today: bool = False, dispatched_today: bool = False,
+              dispatch_status: str = "", stale_claims_minutes: int = 0) -> int:
+        if stale_claims_minutes:
+            row = self.db.query(
+                "SELECT COUNT(*) as cnt FROM jobs WHERE dispatch_status=? "
+                "AND datetime(dispatched_at) < datetime('now', ?)",
+                (DispatchStatus.CLAIMED, f'-{stale_claims_minutes} minutes'),
+            )
+            return list(row)[0]["cnt"]
+        if dispatch_status:
+            row = self.db.query(
+                "SELECT COUNT(*) as cnt FROM jobs WHERE dispatch_status=?",
+                (dispatch_status,),
+            )
+            return list(row)[0]["cnt"]
+        if today:
+            today_iso = _today_str()
+            row = self.db.query(
+                "SELECT COUNT(*) as cnt FROM jobs WHERE last_updated LIKE ?",
+                (f"{today_iso}%",),
+            )
+            return list(row)[0]["cnt"]
+        if dispatched_today:
+            today_iso = _today_str()
+            row = self.db.query(
+                "SELECT COUNT(*) as cnt FROM jobs "
+                "WHERE dispatch_status=? AND applied_at LIKE ?",
+                (DispatchStatus.SUCCESS, f"{today_iso}%"),
+            )
+            return list(row)[0]["cnt"]
+        return self.tbl.count
 
-        :param job_id: 职位标识
-        :param status: 新状态文本
-        """
-        self._jobs.update({"status": status, "last_updated": _now_iso()}, self._JobQ.job_id == job_id)
+    def update_status(self, job_id: str, status: str) -> None:
+        now = _now_iso()
+        self.db.conn.execute(
+            "UPDATE jobs SET status=?, last_updated=? WHERE job_id=?",
+            (status, now, job_id),
+        )
 
-    def search_jobs(self, keyword: str = "", status: str = "") -> list[JobDoc]:
-        """搜索职位记录。
+    def update_note(self, job_id: str, note: str) -> None:
+        now = _now_iso()
+        self.db.conn.execute(
+            "UPDATE jobs SET note=?, last_updated=? WHERE job_id=?",
+            (note, now, job_id),
+        )
 
-        :param keyword: 搜索关键词（匹配 title / company）
-        :param status: 按状态筛选
-        :returns: 匹配的职位文档列表
-        """
-        cond = self._JobQ.job_id != ""  # always true
-        if keyword:
-            cond &= (self._JobQ.title.test(lambda v: keyword.lower() in (v or "").lower())) | \
-                    (self._JobQ.company.test(lambda v: keyword.lower() in (v or "").lower()))
-        if status:
-            cond &= self._JobQ.status == status
-        return [JobDoc(**r) for r in self._jobs.search(cond)]  # type: ignore[arg-type]
-
-    def delete_job(self, job_id: str) -> None:
-        """删除职位记录。
-
-        :param job_id: 职位标识
-        """
-        self._jobs.remove(self._JobQ.job_id == job_id)
+    def delete(self, job_id: str) -> None:
+        self.tbl.delete(job_id)
         log.info("删除 job: %s", job_id)
 
-    def update_job_note(self, job_id: str, note: str) -> None:
-        """更新职位备注。
 
-        :param job_id: 职位标识
-        :param note: 备注文本
-        """
-        self._jobs.update({"note": note, "last_updated": _now_iso()}, self._JobQ.job_id == job_id)
+class ConversationRepo:
+    """conversations 表仓库（复合主键 conv_id+account）。"""
 
-    # ── Conversations ──
+    def __init__(self, db: Database) -> None:
+        self.db = db
+        self.tbl = db["conversations"]
 
-    def upsert_conversation(self, doc: ConvDoc) -> bool | None:
-        """插入或更新一条对话记录。
-
-        :param doc: 对话文档
-        :returns: True 表示新建，False 表示更新（数据发生实质变化），None 表示无变化
-        """
+    def upsert(self, doc: ConvDoc) -> bool | None:
         cid = doc.conv_id or make_conv_id(doc.account, doc.name, doc.company)
-        existing = self._conversations.get(
-            (self._ConvQ.conv_id == cid) & (self._ConvQ.account == doc.account),
-        )
+        pk = (cid, doc.account)
+        try:
+            existing = self.tbl.get(pk)
+        except NotFoundError:
+            existing = None
         now = _now_iso()
         if existing:
             update_data = doc.model_dump(exclude={"conv_id", "account"}, exclude_none=True)
             update_data = {k: v for k, v in update_data.items() if v != ""}
-
-            # 只跟踪页面可感知的字段，跳过 status/linked_job_id/note 等由其他流程维护的字段
             tracked_keys = {"last_msg", "last_msg_time", "platform_status", "sender", "unread_count", "position"}
             has_changes = any(
                 key in update_data and str(update_data[key]) != str(existing.get(key, ""))
@@ -285,278 +212,165 @@ class Storage:
             )
             if not has_changes:
                 return None
-
             update_data["last_updated"] = now
-            self._conversations.update(
-                update_data,
-                (self._ConvQ.conv_id == cid) & (self._ConvQ.account == doc.account),
-            )
+            self.tbl.update(pk, update_data)
             return False
         else:
             data = doc.model_dump(exclude_none=True)
             data["conv_id"] = cid
             data.setdefault("first_seen_at", now)
             data.setdefault("last_updated", now)
-            self._conversations.insert(data)
+            self.tbl.insert(data, pk=("conv_id", "account"))
             return True
 
-    def batch_upsert_conversations(
-        self,
-        account_id: str,
-        items: list[ChatItem],
-    ) -> tuple[int, int]:
-        """批量写入全部聊天项——只读一次 + 只写一次。
-
-        :param account_id: 账号 ID
-        :param items: ChatItem 列表
-        :returns: (new_count, updated_count)
-        """
-        from bzauto.models import infer_status
-
-        table_name = self._conversations.name
-        storage = self._conversations.storage
-        raw = storage.read() or {}
-        table_data: dict[str, dict] = raw.get(table_name, {})
-
-        # 建立 conv_id → doc_id 索引（仅当前账号）
-        conv_to_docid: dict[str, str] = {}
-        for doc_id, doc in table_data.items():
-            if doc.get("account") == account_id and doc.get("conv_id"):
-                conv_to_docid[doc["conv_id"]] = doc_id
-
+    def batch_upsert(self, account_id: str, items: list[Any]) -> tuple[int, int]:
+        from bzauto.models import ChatItem, infer_status
+        new_count = updated_count = 0
         now = _now_iso()
-        new_count = 0
-        updated_count = 0
         tracked_keys = {"last_msg", "last_msg_time", "platform_status", "sender", "unread_count", "position"}
 
-        for item in items:
-            doc = item.to_doc(account_id)
-            cid = doc.conv_id
-            existing_doc_id = conv_to_docid.get(cid)
+        with self.db.conn:
+            for item in items:
+                doc = item.to_doc(account_id)
+                cid = doc.conv_id
+                pk = (cid, account_id)
+                try:
+                    existing = self.tbl.get(pk)
+                except NotFoundError:
+                    existing = None
+                if existing is None:
+                    data = doc.model_dump(exclude_none=True)
+                    data["conv_id"] = cid
+                    data["account"] = account_id
+                    data["first_seen_at"] = now
+                    data["last_updated"] = now
+                    old_status = ConvStatus.NONE
+                    new_status = infer_status(item.sender, item.unread_count, old_status, doc.last_msg_time)
+                    data["status"] = new_status
+                    data["status_changed_at"] = now
+                    self.tbl.insert(data, pk=("conv_id", "account"))
+                    new_count += 1
+                else:
+                    old = ConvDoc(**existing)
+                    old_status = old.status or ConvStatus.NONE
+                    new_status = infer_status(item.sender, item.unread_count, old_status, doc.last_msg_time)
+                    update_data = doc.model_dump(exclude={"conv_id", "account"}, exclude_none=True)
+                    update_data = {k: v for k, v in update_data.items() if v != ""}
+                    has_changes = any(
+                        key in update_data and str(update_data[key]) != str(existing.get(key, ""))
+                        for key in tracked_keys
+                    )
+                    status_changed = new_status != old_status
+                    if not has_changes and not status_changed:
+                        continue
+                    if status_changed:
+                        update_data["status"] = new_status
+                        update_data["status_changed_at"] = now
+                    update_data["last_updated"] = now
+                    self.tbl.update(pk, update_data)
+                    updated_count += 1
 
-            if existing_doc_id:
-                existing = table_data[existing_doc_id]
-                old_status = existing.get("status", ConvStatus.NONE)
-                new_status = infer_status(item.sender, item.unread_count, old_status, doc.last_msg_time)
-
-                update_data = doc.model_dump(exclude={"conv_id", "account"}, exclude_none=True)
-                update_data = {k: v for k, v in update_data.items() if v != ""}
-                has_changes = any(
-                    key in update_data and str(update_data[key]) != str(existing.get(key, ""))
-                    for key in tracked_keys
-                )
-                status_changed = new_status != old_status
-                if not has_changes and not status_changed:
-                    continue
-                if status_changed:
-                    update_data["status"] = new_status
-                    update_data["status_changed_at"] = now
-                update_data["last_updated"] = now
-                table_data[existing_doc_id].update(update_data)
-                updated_count += 1
-            else:
-                data = doc.model_dump(exclude_none=True)
-                cid = doc.conv_id or make_conv_id(account_id, item.name, item.company)
-                data["conv_id"] = cid
-                data["account"] = account_id
-                data["first_seen_at"] = now
-                data["last_updated"] = now
-                # 推断首次状态
-                old_status = ConvStatus.NONE
-                new_status = infer_status(item.sender, item.unread_count, old_status, doc.last_msg_time)
-                data["status"] = new_status
-                data["status_changed_at"] = now
-                # 分配新 doc_id
-                max_id = max((int(k) for k in table_data.keys() if k.isdigit()), default=0)
-                new_id = str(max_id + 1)
-                table_data[new_id] = data
-                new_count += 1
-
-        raw[table_name] = table_data
-        storage.write(raw)
         return new_count, updated_count
 
-    def update_conv_note(self, conv_id: str, account: str, note: str) -> None:
-        """更新对话备注。
-
-        :param conv_id: 对话标识
-        :param account: 账号 ID
-        :param note: 备注文本
-        """
-        self._conversations.update(
-            {"note": note, "last_updated": _now_iso()},
-            (self._ConvQ.conv_id == conv_id) & (self._ConvQ.account == account),
-        )
-
-    def update_conv_status(self, conv_id: str, account: str, status: str) -> None:
-        """更新对话业务状态。
-
-        :param conv_id: 对话标识
-        :param account: 账号 ID
-        :param status: 新状态文本
-        """
-        self._conversations.update(
-            {"status": status, "status_changed_at": _now_iso(), "last_updated": _now_iso()},
-            (self._ConvQ.conv_id == conv_id) & (self._ConvQ.account == account),
-        )
-
-    def get_conversations(self, account: str = "", status: str = "") -> list[ConvDoc]:
-        """查询对话记录。
-
-        :param account: 按账号筛选
-        :param status: 按状态筛选
-        :returns: 对话文档列表
-        """
-        cond = self._ConvQ.conv_id != ""
+    def get(self, conv_id: str, account: str = "") -> ConvDoc | None:
         if account:
-            cond &= self._ConvQ.account == account
+            try:
+                raw = self.tbl.get((conv_id, account))
+            except NotFoundError:
+                return None
+        else:
+            rows = list(self.db.query(
+                "SELECT * FROM conversations WHERE conv_id=? LIMIT 1", (conv_id,),
+            ))
+            raw = rows[0] if rows else None
+        return ConvDoc(**raw) if raw else None
+
+    def list(self, *, account: str = "", status: str = "", keyword: str = "") -> list[ConvDoc]:
+        where: list[str] = []
+        params: list[Any] = []
+        if account:
+            where.append("account = ?")
+            params.append(account)
         if status:
-            cond &= self._ConvQ.status == status
-        return [ConvDoc(**r) for r in self._conversations.search(cond)]  # type: ignore[arg-type]
-
-    def get_conversation(self, conv_id: str, account: str = "") -> ConvDoc | None:
-        """按 conv_id 查询单条对话。
-
-        :param conv_id: 对话 ID
-        :param account: 账号 ID
-        :returns: ConvDoc 或 None
-        """
-        cond = self._ConvQ.conv_id == conv_id
-        if account:
-            cond &= self._ConvQ.account == account
-        results = self._conversations.search(cond)
-        return ConvDoc(**results[0]) if results else None
-
-    def search_conversations(self, keyword: str = "", status: str = "", account: str = "") -> list[ConvDoc]:
-        """搜索对话记录。
-
-        :param keyword: 搜索关键词（匹配 name / company）
-        :param status: 按状态筛选
-        :param account: 按账号筛选
-        :returns: 对话文档列表
-        """
-        cond = self._ConvQ.conv_id != ""
+            where.append("status = ?")
+            params.append(status)
         if keyword:
-            cond &= (self._ConvQ.name.test(lambda v: keyword.lower() in (v or "").lower())) | \
-                    (self._ConvQ.company.test(lambda v: keyword.lower() in (v or "").lower()))
-        if status:
-            cond &= self._ConvQ.status == status
-        if account:
-            cond &= self._ConvQ.account == account
-        return [ConvDoc(**r) for r in self._conversations.search(cond)]  # type: ignore[arg-type]
+            where.append("(LOWER(name) LIKE ? OR LOWER(company) LIKE ?)")
+            kw = f"%{keyword.lower()}%"
+            params.extend([kw, kw])
+        sql = "SELECT * FROM conversations"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY last_updated DESC"
+        return [ConvDoc(**r) for r in self.db.query(sql, params)]
 
-    def delete_conversation(self, conv_id: str, account: str) -> None:
-        """删除对话记录。
-
-        :param conv_id: 对话标识
-        :param account: 账号 ID
-        """
-        self._conversations.remove(
-            (self._ConvQ.conv_id == conv_id) & (self._ConvQ.account == account),
+    def update_status(self, conv_id: str, account: str, status: str) -> None:
+        now = _now_iso()
+        self.db.conn.execute(
+            "UPDATE conversations SET status=?, status_changed_at=?, last_updated=? "
+            "WHERE conv_id=? AND account=?",
+            (status, now, now, conv_id, account),
         )
-        log.info("删除对话: conv_id=%s account=%s", conv_id, account)
+
+    def update_note(self, conv_id: str, account: str, note: str) -> None:
+        now = _now_iso()
+        self.db.conn.execute(
+            "UPDATE conversations SET note=?, last_updated=? WHERE conv_id=? AND account=?",
+            (note, now, conv_id, account),
+        )
 
     def mark_deleted(self, conv_id: str, account: str) -> None:
-        """标记对话为已删除。
-
-        :param conv_id: 对话标识
-        :param account: 账号 ID
-        """
-        self._conversations.update(
-            {"status": ConvStatus.CLOSED, "status_changed_at": _now_iso(), "last_updated": _now_iso()},
-            (self._ConvQ.conv_id == conv_id) & (self._ConvQ.account == account),
+        now = _now_iso()
+        self.db.conn.execute(
+            "UPDATE conversations SET status=?, status_changed_at=?, last_updated=? "
+            "WHERE conv_id=? AND account=?",
+            (ConvStatus.CLOSED, now, now, conv_id, account),
         )
 
-    def get_conversations_by_status(self, status: str, account: str) -> list[ConvDoc]:
-        """按状态查询对话。
+    def delete(self, conv_id: str, account: str) -> None:
+        self.tbl.delete((conv_id, account))
+        log.info("删除对话: conv_id=%s account=%s", conv_id, account)
 
-        :param status: 状态文本
-        :param account: 账号 ID
-        :returns: 对话文档列表
-        """
-        cond = (self._ConvQ.status == status) & (self._ConvQ.account == account)
-        return [ConvDoc(**r) for r in self._conversations.search(cond)]  # type: ignore[arg-type]
 
-    # ── Accounts ──
+class AccountRepo:
+    """accounts 表仓库。"""
 
-    def get_account(self, account_id: str) -> AccountDoc | None:
-        """查询账号。
+    def __init__(self, db: Database) -> None:
+        self.db = db
+        self.tbl = db["accounts"]
 
-        :param account_id: 账号 ID
-        :returns: 账号文档或 None
-        """
-        raw = self._accounts.get(self._AccountQ.account_id == account_id)
-        return AccountDoc(**raw) if raw else None  # type: ignore[arg-type]
+    @staticmethod
+    def _get_or_none(tbl: Any, pk: str) -> dict | None:
+        try:
+            return tbl.get(pk)
+        except NotFoundError:
+            return None
 
-    def get_all_accounts(self) -> list[AccountDoc]:
-        """获取全部账号。"""
-        return [AccountDoc(**r) for r in self._accounts.all()]  # type: ignore[arg-type]
+    def get(self, account_id: str) -> AccountDoc | None:
+        raw = self._get_or_none(self.tbl, account_id)
+        return AccountDoc(**raw) if raw else None
 
-    def get_enabled_accounts(self) -> list[AccountDoc]:
-        """获取已启用账号列表（含当日配额重置检查）。
-
-        从配置读取账号列表，从 DB 获取当日计数，
-        自动处理跨日重置（last_reset_date != today 时 daily_count 归零）。
-
-        :returns: 已启用账号文档列表
-        """
-        from bzauto.config import get_config
-        cfg = get_config()
-        result: list[AccountDoc] = []
-        for acc_cfg in cfg.accounts:
-            if not acc_cfg.enabled:
-                continue
-            db_acc = self._accounts.get(self._AccountQ.account_id == acc_cfg.id)
-            daily_count: int
-            last_reset: str
-            if db_acc:
-                daily_count = db_acc.get("daily_count", 0)
-                last_reset = db_acc.get("last_reset_date", "")
-                if last_reset != _today_str():
-                    daily_count = 0
-            else:
-                daily_count = 0
-                last_reset = ""
-            doc = AccountDoc(
-                account_id=acc_cfg.id,
-                name=acc_cfg.name,
-                daily_count=daily_count,
-                daily_limit=acc_cfg.daily_limit,
-                last_reset_date=_today_str(),
-                enabled=True,
-                role=acc_cfg.role,
-            )
-            result.append(doc)
-        return result
+    def list(self, *, enabled_only: bool = False) -> list[AccountDoc]:
+        if enabled_only:
+            rows = self.db.query("SELECT * FROM accounts WHERE enabled=1")
+        else:
+            rows = self.db.query("SELECT * FROM accounts")
+        return [AccountDoc(**r) for r in rows]
 
     def get_remaining_quota(self, account_id: str) -> int:
-        """获取账号当日剩余配额。
-
-        :param account_id: 账号 ID
-        :returns: 剩余可投递次数
-        """
-        account = self._accounts.get(self._AccountQ.account_id == account_id)
-        if account is None:
+        raw = self._get_or_none(self.tbl, account_id)
+        if raw is None:
             return 150
-        daily_limit = account.get("daily_limit", 150)
-        daily_count = account.get("daily_count", 0)
-        last_reset = account.get("last_reset_date", "")
-        if last_reset != _today_str():
-            daily_count = 0
-            self._accounts.update(
-                {"daily_count": 0, "last_reset_date": _today_str()},
-                self._AccountQ.account_id == account_id,
-            )
-        return max(0, daily_limit - daily_count)
+        doc = AccountDoc(**raw)
+        if doc.last_reset_date != _today_str():
+            doc.daily_count = 0
+            self.reset_daily_count(account_id)
+        return max(0, doc.daily_limit - doc.daily_count)
 
     def increment_daily_count(self, account_id: str, n: int = 1) -> None:
-        """增加账号当日计数。
-
-        :param account_id: 账号 ID
-        :param n: 增量（默认 1）
-        """
-        account = self._accounts.get(self._AccountQ.account_id == account_id)
-        if account is None:
+        raw = self._get_or_none(self.tbl, account_id)
+        now = _today_str()
+        if raw is None:
             from bzauto.config import get_config
             cfg_accounts = get_config().accounts
             limit = 150
@@ -566,149 +380,411 @@ class Storage:
                     limit = a.daily_limit
                     name = a.name
                     break
-            self._accounts.insert({
+            self.tbl.insert({
                 "account_id": account_id,
                 "name": name,
                 "daily_count": n,
                 "daily_limit": limit,
-                "last_reset_date": _today_str(),
+                "last_reset_date": now,
                 "enabled": True,
             })
         else:
-            last_reset = account.get("last_reset_date", "")
-            count = account.get("daily_count", 0)
-            if last_reset != _today_str():
+            last_reset = raw.get("last_reset_date", "")
+            count = raw.get("daily_count", 0)
+            if last_reset != now:
                 count = 0
-            self._accounts.update(
-                {
-                    "daily_count": count + n,
-                    "last_reset_date": _today_str(),
-                },
-                self._AccountQ.account_id == account_id,
+            self.db.conn.execute(
+                "UPDATE accounts SET daily_count=?, last_reset_date=? WHERE account_id=?",
+                (count + n, now, account_id),
             )
 
     def reset_daily_count(self, account_id: str) -> None:
-        """重置账号当日计数为 0。
-
-        :param account_id: 账号 ID
-        """
-        self._accounts.update(
-            {"daily_count": 0, "last_reset_date": _today_str()},
-            self._AccountQ.account_id == account_id,
+        self.db.conn.execute(
+            "UPDATE accounts SET daily_count=0, last_reset_date=? WHERE account_id=?",
+            (_today_str(), account_id),
         )
 
-    def reset_daily_counts_if_new_day(self) -> None:
-        """检查并重置所有账号的跨日计数。"""
+    def reset_daily_counts_if_new_day(self) -> int:
         today = _today_str()
-        for doc in self._accounts.all():
-            if doc.get("last_reset_date") != today:
-                self._accounts.update(
-                    {"daily_count": 0, "last_reset_date": today},
-                    doc.doc_id,  # type: ignore[arg-type]
-                )
-        log.info("每日计数已检查/重置")
+        cursor = self.db.conn.execute(
+            "UPDATE accounts SET daily_count=0, last_reset_date=? "
+            "WHERE last_reset_date<>?",
+            (today, today),
+        )
+        if cursor.rowcount:
+            log.info("每日计数已重置: %d 条", cursor.rowcount)
+        return cursor.rowcount
 
     def set_daily_count_maxed(self, account_id: str) -> None:
-        """将当日计数设为上限，使剩余配额归零。
-
-        :param account_id: 账号 ID
-        """
-        account = self._accounts.get(self._AccountQ.account_id == account_id)
-        if account is None:
+        raw = self._get_or_none(self.tbl, account_id)
+        if raw is None:
             return
-        limit = account.get("daily_limit", 150)
-        self._accounts.update(
-            {"daily_count": limit, "last_reset_date": _today_str()},
-            self._AccountQ.account_id == account_id,
+        limit = raw.get("daily_limit", 150)
+        self.db.conn.execute(
+            "UPDATE accounts SET daily_count=?, last_reset_date=? WHERE account_id=?",
+            (limit, _today_str(), account_id),
         )
+
+    def set_daily_limit(self, account_id: str, limit: int) -> None:
+        self.db.conn.execute(
+            "UPDATE accounts SET daily_limit=? WHERE account_id=?",
+            (limit, account_id),
+        )
+
+
+class RunRepo:
+    """schedule_runs 表仓库。"""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+        self.tbl = db["schedule_runs"]
+
+    def insert(self, doc: RunDoc) -> int:
+        data = doc.model_dump(exclude={"id"}, exclude_none=True)
+        self.tbl.insert(data)
+        return self.tbl.last_pk  # type: ignore[no-any-return]
+
+    def list_recent(self, limit: int = 50) -> list[RunDoc]:
+        rows = self.db.query(
+            "SELECT * FROM schedule_runs ORDER BY started_at DESC LIMIT ?",
+            (limit,),
+        )
+        return [RunDoc(**r) for r in rows]
+
+    def list_today(self) -> list[RunDoc]:
+        today = _today_str()
+        rows = self.db.query(
+            "SELECT * FROM schedule_runs WHERE started_at LIKE ?",
+            (f"{today}%",),
+        )
+        return [RunDoc(**r) for r in rows]
+
+    def purge_old(self, days: int = 30) -> int:
+        cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
+        cursor = self.db.conn.execute(
+            "DELETE FROM schedule_runs WHERE started_at < ?", (cutoff,),
+        )
+        if cursor.rowcount:
+            log.info("清理旧执行记录: %d 条 (截止 %s)", cursor.rowcount, cutoff)
+        return cursor.rowcount
+
+
+
+
+
+class MetaRepo:
+    """meta 键值表仓库。"""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+        self.tbl = db["meta"]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            raw = self.tbl.get(key)
+        except NotFoundError:
+            return default
+        if raw is None:
+            return default
+        try:
+            return json.loads(raw["value"])
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return raw["value"]
+
+    def set(self, key: str, value: Any) -> None:
+        self.tbl.upsert(
+            {"key": key, "value": json.dumps(value, ensure_ascii=False)},
+            pk="key",
+        )
+
+
+class SeenHrefsRepo:
+    """seen_job_hrefs 表仓库。"""
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+        self.tbl = db["seen_job_hrefs"]
+
+    def get_all(self) -> set[str]:
+        rows = self.db.query("SELECT href FROM seen_job_hrefs")
+        return {r["href"] for r in rows}
+
+    def add(self, hrefs: list[str]) -> int:
+        count = 0
+        for href in hrefs:
+            try:
+                self.tbl.insert({"href": href}, pk="href", ignore=True)
+                count += 1
+            except Exception:
+                pass
+        return count
+
+    def count(self) -> int:
+        row = list(self.db.query("SELECT COUNT(*) AS cnt FROM seen_job_hrefs"))
+        return row[0]["cnt"] if row else 0
+
+
+# ──────────────────────────────────────────────
+#  Storage 顶层入口
+# ──────────────────────────────────────────────
+
+
+class Storage:
+    """SQLite + sqlite-utils 持久化层。
+
+    使用 store.jobs.xxx() / store.conversations.xxx() 访问各仓库。
+    """
+
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        cfg = get_config()
+        path = Path(db_path or cfg.storage.db_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = Database(str(path))
+        self.db.enable_wal()
+        self._init_schema()
+
+        self.jobs = JobRepo(self.db)
+        self.conversations = ConversationRepo(self.db)
+        self.accounts = AccountRepo(self.db)
+        self.runs = RunRepo(self.db)
+        self.meta = MetaRepo(self.db)
+        self.seen_hrefs = SeenHrefsRepo(self.db)
+
+        log.info("数据库初始化: %s", path)
+
+    def _init_schema(self) -> None:
+        """幂等建表 + 索引。"""
+
+        # jobs
+        self.db["jobs"].create({
+            "job_id": str,
+            "title": str,
+            "salary_raw": str,
+            "salary_min": int,
+            "salary_max": int,
+            "company": str,
+            "href": str,
+            "location": str,
+            "account": str,
+            "dispatched_by": str,
+            "status": str,
+            "dispatch_status": str,
+            "dispatched_at": str,
+            "applied_at": str,
+            "last_updated": str,
+            "job_desc": str,
+            "note": str,
+        }, pk="job_id", if_not_exists=True)
+        self.db.conn.execute(
+            "CREATE INDEX IF NOT EXISTS [idx_jobs_dispatch_status] ON [jobs]([dispatch_status])",
+        )
+        self.db.conn.execute(
+            "CREATE INDEX IF NOT EXISTS [idx_jobs_dispatch_status_dispatched_at] "
+            "ON [jobs]([dispatch_status], [dispatched_at])",
+        )
+        self.db.conn.execute(
+            "CREATE INDEX IF NOT EXISTS [idx_jobs_last_updated] ON [jobs]([last_updated])",
+        )
+
+        # conversations
+        self.db["conversations"].create({
+            "conv_id": str,
+            "account": str,
+            "name": str,
+            "company": str,
+            "position": str,
+            "last_msg": str,
+            "last_msg_time": str,
+            "platform_status": str,
+            "status": str,
+            "sender": str,
+            "unread_count": int,
+            "status_changed_at": str,
+            "linked_job_id": str,
+            "first_seen_at": str,
+            "last_updated": str,
+            "note": str,
+            "unique_id": str,
+            "encrypt_boss_id": str,
+            "encrypt_job_id": str,
+        }, pk=("conv_id", "account"), if_not_exists=True)
+        self.db.conn.execute(
+            "CREATE INDEX IF NOT EXISTS [idx_conv_account] ON [conversations]([account])",
+        )
+        self.db.conn.execute(
+            "CREATE INDEX IF NOT EXISTS [idx_conv_account_status] ON [conversations]([account], [status])",
+        )
+
+        # accounts
+        self.db["accounts"].create({
+            "account_id": str,
+            "name": str,
+            "daily_count": int,
+            "daily_limit": int,
+            "last_reset_date": str,
+            "enabled": int,
+            "role": str,
+        }, pk="account_id", if_not_exists=True)
+
+        # schedule_runs
+        self.db["schedule_runs"].create({
+            "id": int,
+            "trigger": str,
+            "account_id": str,
+            "account_name": str,
+            "started_at": str,
+            "finished_at": str,
+            "status": str,
+            "result": str,
+            "error": str,
+        }, pk="id", if_not_exists=True)
+        self.db.conn.execute(
+            "CREATE INDEX IF NOT EXISTS [idx_runs_started_at] ON [schedule_runs]([started_at])",
+        )
+
+        # meta
+        self.db["meta"].create({
+            "key": str,
+            "value": str,
+        }, pk="key", if_not_exists=True)
+
+        # seen_job_hrefs
+        self.db["seen_job_hrefs"].create({
+            "href": str,
+        }, pk="href", if_not_exists=True)
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """显式事务上下文。异常时自动回滚。"""
+        with self.db.conn:
+            yield
+
+    # ── 兼容旧 API（委托到仓库） ──
+    # 这些方法保持旧签名，内部委托到新仓库，以便逐步迁移调用点。
+    # 迁移完成后可移除。
+
+    def upsert_job(self, doc: JobDoc) -> None:
+        self.jobs.upsert(doc)
+
+    def get_pending_jobs(self, limit: int = 50) -> list[JobDoc]:
+        return self.jobs.list(dispatch_status=DispatchStatus.PENDING, limit=limit)
+
+    def count_jobs_today(self) -> int:
+        return self.jobs.count(today=True)
+
+    def count_dispatched_today(self) -> int:
+        return self.jobs.count(dispatched_today=True)
+
+    def count_pending_jobs(self) -> int:
+        return self.jobs.count(dispatch_status=DispatchStatus.PENDING)
+
+    def get_job(self, job_id: str) -> JobDoc | None:
+        return self.jobs.get(job_id)
+
+    def claim_job(self, job_id: str, account_id: str) -> bool:
+        return self.jobs.claim(job_id, account_id)
+
+    def mark_job_success(self, job_id: str) -> None:
+        self.jobs.mark_success(job_id)
+
+    def mark_job_failed(self, job_id: str) -> None:
+        self.jobs.mark_failed(job_id)
+
+    def count_stale_claims(self, timeout_minutes: int = 30) -> int:
+        return self.jobs.count(stale_claims_minutes=timeout_minutes)
+
+    def release_stale_claims(self, timeout_minutes: int = 30) -> int:
+        return self.jobs.release_stale_claims(timeout_minutes)
+
+    def update_job_status(self, job_id: str, status: str) -> None:
+        self.jobs.update_status(job_id, status)
+
+    def search_jobs(self, keyword: str = "", status: str = "") -> list[JobDoc]:
+        return self.jobs.list(keyword=keyword, status=status)
+
+    def delete_job(self, job_id: str) -> None:
+        self.jobs.delete(job_id)
+
+    def update_job_note(self, job_id: str, note: str) -> None:
+        self.jobs.update_note(job_id, note)
+
+    def upsert_conversation(self, doc: ConvDoc) -> bool | None:
+        return self.conversations.upsert(doc)
+
+    def batch_upsert_conversations(self, account_id: str, items: list[Any]) -> tuple[int, int]:
+        return self.conversations.batch_upsert(account_id, items)
+
+    def update_conv_note(self, conv_id: str, account: str, note: str) -> None:
+        self.conversations.update_note(conv_id, account, note)
+
+    def update_conv_status(self, conv_id: str, account: str, status: str) -> None:
+        self.conversations.update_status(conv_id, account, status)
+
+    def get_conversations(self, account: str = "", status: str = "") -> list[ConvDoc]:
+        return self.conversations.list(account=account, status=status)
+
+    def get_conversation(self, conv_id: str, account: str = "") -> ConvDoc | None:
+        return self.conversations.get(conv_id, account)
+
+    def search_conversations(self, keyword: str = "", status: str = "", account: str = "") -> list[ConvDoc]:
+        return self.conversations.list(keyword=keyword, status=status, account=account)
+
+    def delete_conversation(self, conv_id: str, account: str) -> None:
+        self.conversations.delete(conv_id, account)
+
+    def mark_deleted(self, conv_id: str, account: str) -> None:
+        self.conversations.mark_deleted(conv_id, account)
+
+    def get_conversations_by_status(self, status: str, account: str) -> list[ConvDoc]:
+        return self.conversations.list(status=status, account=account)
+
+    def get_account(self, account_id: str) -> AccountDoc | None:
+        return self.accounts.get(account_id)
+
+    def get_all_accounts(self) -> list[AccountDoc]:
+        return self.accounts.list()
+
+    def get_enabled_accounts(self) -> list[AccountDoc]:
+        return self.accounts.list(enabled_only=True)
+
+    def get_remaining_quota(self, account_id: str) -> int:
+        return self.accounts.get_remaining_quota(account_id)
+
+    def increment_daily_count(self, account_id: str, n: int = 1) -> None:
+        self.accounts.increment_daily_count(account_id, n)
+
+    def reset_daily_count(self, account_id: str) -> None:
+        self.accounts.reset_daily_count(account_id)
+
+    def reset_daily_counts_if_new_day(self) -> None:
+        self.accounts.reset_daily_counts_if_new_day()
+
+    def set_daily_count_maxed(self, account_id: str) -> None:
+        self.accounts.set_daily_count_maxed(account_id)
 
     def set_account_daily_limit(self, account_id: str, limit: int) -> None:
-        """设置账号每日上限。
-
-        :param account_id: 账号 ID
-        :param limit: 上限值
-        """
-        self._accounts.upsert(
-            {"daily_limit": limit},
-            self._AccountQ.account_id == account_id,
-        )
-
-    # ── Schedule Runs ──
+        self.accounts.set_daily_limit(account_id, limit)
 
     def insert_run(self, doc: RunDoc) -> int:
-        """插入一条调度执行记录。
-
-        :param doc: 执行记录文档
-        :returns: TinyDB doc_id
-        """
-        data = doc.model_dump(exclude_none=True)
-        return self._runs.insert(data)
+        return self.runs.insert(doc)
 
     def get_recent_runs(self, limit: int = 50) -> list[RunDoc]:
-        """获取最近执行记录（按 started_at 倒序）。
-
-        :param limit: 最大返回条数
-        :returns: 执行记录文档列表
-        """
-        docs = self._runs.all()
-        docs.sort(key=lambda d: d.get("started_at", ""), reverse=True)
-        return [RunDoc(**r) for r in docs[:limit]]  # type: ignore[arg-type]
+        return self.runs.list_recent(limit)
 
     def get_runs_today(self) -> list[RunDoc]:
-        """获取今日执行记录。
-
-        :returns: 今日执行记录列表
-        """
-        today = _today_str()
-        return [RunDoc(**r) for r in self._runs.search(
-            self._RunQ.started_at.test(lambda v: v.startswith(today) if v else False),
-        )]  # type: ignore[arg-type]
+        return self.runs.list_today()
 
     def purge_old_runs(self, days: int = 30) -> int:
-        """清理指定天数之前的执行记录。
-
-        :param days: 保留天数（默认 30）
-        :returns: 删除的记录数
-        """
-        cutoff = (datetime.date.today() - datetime.timedelta(days=days)).isoformat()
-        removed = self._runs.remove(self._RunQ.started_at < cutoff)
-        if removed:
-            log.info("清理旧执行记录: %d 条 (截止 %s)", len(removed), cutoff)
-        return len(removed)
-
-    # ── Meta ──
+        return self.runs.purge_old(days)
 
     def get_meta(self, key: str, default: Any = None) -> Any:
-        """读取元数据。
-
-        :param key: 键
-        :param default: 默认值
-        :returns: 存储的值
-        """
-        doc = self._meta.get(self._MetaQ.key == key)
-        return doc.get("value", default) if doc else default
+        return self.meta.get(key, default)
 
     def set_meta(self, key: str, value: Any) -> None:
-        """写入元数据。
-
-        :param key: 键
-        :param value: 值
-        """
-        self._meta.upsert({"key": key, "value": value}, self._MetaQ.key == key)
+        self.meta.set(key, value)
 
     def get_seen_job_hrefs(self) -> set[str]:
-        """获取已见过的职位 href 集合（用于跨次去重）。
-
-        :returns: href 集合
-        """
-        val = self.get_meta("seen_job_hrefs", [])
-        return set(val) if isinstance(val, list) else set()
+        return self.seen_hrefs.get_all()
 
     def add_seen_job_hrefs(self, hrefs: list[str]) -> None:
-        """添加已见过的职位 href。
-
-        :param hrefs: 待添加的 href 列表
-        """
-        seen = self.get_seen_job_hrefs()
-        seen.update(hrefs)
-        self.set_meta("seen_job_hrefs", list(seen))
+        self.seen_hrefs.add(hrefs)

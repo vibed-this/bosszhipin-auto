@@ -169,7 +169,7 @@ class DataWindow(QWidget):
         status = self._jobs_status.currentText()
         if status == "全部":
             status = ""
-        jobs = self._storage.search_jobs(keyword=keyword, status=status)
+        jobs = self._storage.jobs.list(keyword=keyword, status=status)
         table = self._jobs_table
         table.setSortingEnabled(False)
         table.setRowCount(len(jobs))
@@ -186,7 +186,7 @@ class DataWindow(QWidget):
             table.setItem(i, 8, QTableWidgetItem(j.note))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, j.job_id)
         table.setSortingEnabled(True)
-        total = len(self._storage.search_jobs())
+        total = len(self._storage.jobs.list())
         filtered = len(jobs)
         self._jobs_status_bar.setText(f"总 {total} 条 | 筛选 {filtered} 条")
 
@@ -198,7 +198,7 @@ class DataWindow(QWidget):
         account = self._conv_account.currentText()
         if account == "全部":
             account = ""
-        convs = self._storage.search_conversations(keyword=keyword, status=status, account=account)
+        convs = self._storage.conversations.list(keyword=keyword, status=status, account=account)
         msg_type_filter = self._conv_msg_type.currentText()
         if msg_type_filter != "全部":
             convs = [c for c in convs if classify_msg_type(c.last_msg, c.sender, c.platform_status).value == msg_type_filter]
@@ -267,20 +267,20 @@ class DataWindow(QWidget):
         current = self._jobs_table.item(row, 4).text() if self._jobs_table.item(row, 4) else ""
         new_status, ok = QInputDialog.getItem(self, "修改状态", "新状态:", statuses, current=statuses.index(current) if current in statuses else 0)
         if ok and new_status:
-            self._storage.update_job_status(job_id, new_status)
+            self._storage.jobs.update_status(job_id, new_status)
             self._refresh_jobs()
 
     def _edit_job_note(self, row, job_id):
         current = self._jobs_table.item(row, 7).text() if self._jobs_table.item(row, 7) else ""
         new_note, ok = QInputDialog.getText(self, "修改备注", "备注:", text=current)
         if ok:
-            self._storage.update_job_note(job_id, new_note)
+            self._storage.jobs.update_note(job_id, new_note)
             self._refresh_jobs()
 
     def _delete_job(self, row, job_id):
         reply = QMessageBox.question(self, "确认删除", f"确定删除该记录？", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
-            self._storage.delete_job(job_id)
+            self._storage.jobs.delete(job_id)
             self._refresh_jobs()
 
     def _export_jobs_csv(self):
@@ -288,7 +288,7 @@ class DataWindow(QWidget):
         status = self._jobs_status.currentText()
         if status == "全部":
             status = ""
-        jobs = self._storage.search_jobs(keyword=keyword, status=status)
+        jobs = self._storage.jobs.list(keyword=keyword, status=status)
         path, _ = QFileDialog.getSaveFileName(self, "导出 CSV", "jobs.csv", "CSV (*.csv)")
         if not path:
             return
@@ -365,7 +365,7 @@ class DataWindow(QWidget):
         current = self._conv_table.item(row, 11).text() if self._conv_table.item(row, 11) else ""
         new_note, ok = QInputDialog.getText(self, "修改备注", "备注:", text=current)
         if ok:
-            self._storage.update_conv_note(conv_id, account, new_note)
+            self._storage.conversations.update_note(conv_id, account, new_note)
             self._refresh_convs()
 
     def _edit_conv_status(self, row, conv_id, account):
@@ -373,11 +373,11 @@ class DataWindow(QWidget):
         current = self._conv_table.item(row, 8).text() if self._conv_table.item(row, 8) else ""
         new_status, ok = QInputDialog.getItem(self, "修改状态", "新状态:", statuses, current=statuses.index(current) if current in statuses else 0)
         if ok and new_status:
-            self._storage.update_conv_status(conv_id, account, new_status)
+            self._storage.conversations.update_status(conv_id, account, new_status)
             self._refresh_convs()
 
     def _delete_conv(self, row, conv_id, account):
         reply = QMessageBox.question(self, "确认删除", f"确定删除该记录？", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply == QMessageBox.StandardButton.Yes:
-            self._storage.delete_conversation(conv_id, account)
+            self._storage.conversations.delete(conv_id, account)
             self._refresh_convs()

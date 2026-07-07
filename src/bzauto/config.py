@@ -29,7 +29,7 @@ class StorageConfig(BaseModel):
     :ivar db_path: TinyDB 数据库文件路径
     """
 
-    db_path: str = "data/bzauto.tinydb"
+    db_path: str = "data/bzauto.db"
 
 
 class ScrapeFilterConfig(BaseModel):
@@ -179,7 +179,7 @@ def _write_default_template(path: Path) -> None:
 profiles_dir = "profiles"
 
 [storage]
-db_path = "data/bzauto.tinydb"
+db_path = "data/bzauto.db"
 
 [scrape]
 scroll_timeout = 5.0

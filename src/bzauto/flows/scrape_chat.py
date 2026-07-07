@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from dataclasses import asdict
 from pathlib import Path
 
 from bzauto.browser.session import BrowserSession
@@ -66,7 +65,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
 
         # 一次性批量写入 DB
         if storage and all_items:
-            new_count, updated_count = storage.batch_upsert_conversations(
+            new_count, updated_count = storage.conversations.batch_upsert(
                 self._account_id, all_items,
             )
             log.info("DB 写入完成: 新增 %d, 更新 %d", new_count, updated_count)
@@ -74,7 +73,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         if output:
             path = Path(output)
             path.write_text(
-                json.dumps([asdict(i) for i in all_items], ensure_ascii=False, indent=2),
+                json.dumps([i.model_dump() for i in all_items], ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
 

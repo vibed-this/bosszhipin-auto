@@ -64,7 +64,7 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
 
         all_jobs: list[JobCard] = []
 
-        seen_hrefs = self._storage.get_seen_job_hrefs() if self._storage else set()
+        seen_hrefs = self._storage.seen_hrefs.get_all() if self._storage else set()
         seen_duplicate: set[tuple[str, str]] = set()
 
         async for card, idx in self._iter_cards(max_scrolls=max_scrolls, min_salary=min_salary, max_salary=max_salary, max_jobs=max_jobs):
@@ -82,8 +82,8 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
 
             if self._storage:
                 job_doc = card.to_doc(self._account_id)
-                self._storage.upsert_job(job_doc)
-                self._storage.add_seen_job_hrefs([card.href])
+                self._storage.jobs.upsert(job_doc)
+                self._storage.seen_hrefs.add([card.href])
 
             if len(all_jobs) >= max_jobs:
                 log.info("已达采集上限 %d 条，停止", max_jobs)

@@ -222,7 +222,7 @@ __marimo__/
 # Node
 node_modules/
 
-# Runtime data (TinyDB database)
+# Runtime data (SQLite database)
 data/
 
 # Config file (per-machine secrets, accounts, tokens)

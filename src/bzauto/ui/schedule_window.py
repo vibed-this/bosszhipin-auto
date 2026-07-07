@@ -231,15 +231,15 @@ class ScheduleWindow(QWidget):
                     item.setText(f"{seconds} 秒后")
 
     def _refresh_backlog(self) -> None:
-        self._lbl_pending.setText(f"待处理投递: {self._storage.count_pending_jobs()}")
-        self._lbl_stale.setText(f"超时 Claim: {self._storage.count_stale_claims()}")
-        self._lbl_today_jobs.setText(f"今日更新: {self._storage.count_jobs_today()}")
-        self._lbl_dispatched.setText(f"今日投递: {self._storage.count_dispatched_today()}")
+        self._lbl_pending.setText(f"待处理投递: {self._storage.jobs.count(dispatch_status='pending')}")
+        self._lbl_stale.setText(f"超时 Claim: {self._storage.jobs.count(stale_claims_minutes=30)}")
+        self._lbl_today_jobs.setText(f"今日更新: {self._storage.jobs.count(today=True)}")
+        self._lbl_dispatched.setText(f"今日投递: {self._storage.jobs.count(dispatched_today=True)}")
 
     def _refresh_recent_runs(self) -> None:
         table = self._runs_table
         table.setRowCount(0)
-        runs = self._storage.get_recent_runs(limit=50)
+        runs = self._storage.runs.list_recent(limit=50)
         table.setRowCount(len(runs))
         for i, run in enumerate(runs):
             table.setItem(i, 0, QTableWidgetItem(_fmt_run_time(run.started_at)))
