@@ -22,7 +22,7 @@ from bzauto.browser.manager import _set_browser_manager
 from bzauto.config import get_config
 from bzauto.models import JobCard
 from bzauto.pages.job_list import BossJobListPage
-from bzauto.flows.scrape import BossScrapeFlow
+from bzauto.flows.scrape_only import BossScrapeOnlyFlow
 from bzauto.storage import Storage
 
 log = logging.getLogger("boss.main")
@@ -49,7 +49,7 @@ class BossJobsAuto:
 
         session = manager.get_session(self._account_id)
         page = BossJobListPage(session)
-        flow = BossScrapeFlow(page, session, self._account_id, self._storage)
+        flow = BossScrapeOnlyFlow(page, session, self._account_id, self._storage)
 
         result = await flow.run(url, max_scrolls=max_scrolls, reuse_existing=reuse_existing)
 

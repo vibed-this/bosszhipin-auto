@@ -41,7 +41,7 @@ QWebEngineView 桌面浏览器自动控制，支持多账号独立 Profile、JS 
 │       │   └── chat_list.py      # BossChatListPage — 聊天列表页面对象
 │       ├── flows/
 │       │   ├── base.py           # BaseFlow 基类
-│       │   ├── scrape.py         # BossScrapeFlow — 爬取+沟通
+│       │   ├── scrape.py         # [已删除] 爬取+沟通混合版，拆分到 scrape_only + dispatch
 │       │   ├── scrape_only.py    # BossScrapeOnlyFlow — 纯爬取
 │       │   ├── scrape_chat.py    # BossScrapeChatFlow — 聊天爬取
 │       │   ├── delete_chat.py    # BossDeleteChatFlow — 删拒

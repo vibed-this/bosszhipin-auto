@@ -16,7 +16,6 @@ from bzauto.browser import get_browser_manager
 from bzauto.flows.delete_chat import BossDeleteChatFlow
 from bzauto.flows.dispatch import DispatchFlow
 from bzauto.flows.scan import ScanFlow
-from bzauto.flows.scrape import BossScrapeFlow
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.flows.scrape_only import BossScrapeOnlyFlow
 from bzauto.notify import NotificationAggregator, format_task_lines, get_notifier
@@ -122,22 +121,6 @@ class DeleteChatTask(ScheduledTask):
         page = BossChatListPage(session)
         flow = BossDeleteChatFlow(page, session, self._account_id, self._storage)
         return {"deleted": len(await flow.run(dry_run=False))}
-
-
-class ScrapeAndChatTask(ScheduledTask):
-    name = "抓取沟通"
-
-    def __init__(self, account_id: str, storage: Storage) -> None:
-        self._account_id = account_id
-        self._storage = storage
-
-    async def execute(self) -> dict[str, Any]:
-        bm = get_browser_manager()
-        session = bm.get_session(self._account_id)
-        page = BossJobListPage(session)
-        flow = BossScrapeFlow(page, session, self._account_id, self._storage)
-        jobs = await flow.run(max_scrolls=10)
-        return {"scraped_and_chatted": len(jobs)}
 
 
 class ScanTask(ScheduledTask):

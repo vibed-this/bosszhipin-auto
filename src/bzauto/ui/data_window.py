@@ -77,10 +77,10 @@ class DataWindow(QWidget):
         toolbar.addWidget(self._btn_refresh)
         layout.addLayout(toolbar)
 
-        self._jobs_table = QTableWidget(0, 8)
-        self._jobs_table.setHorizontalHeaderLabels(["职位名", "公司", "薪资", "地点", "状态", "账号", "投递时间", "备注"])
+        self._jobs_table = QTableWidget(0, 9)
+        self._jobs_table.setHorizontalHeaderLabels(["职位名", "公司", "薪资", "地点", "状态", "采集账号", "投递账号", "投递时间", "备注"])
         header = self._jobs_table.horizontalHeader()
-        widths = [180, 160, 80, 120, 80, 80, 160, 120]
+        widths = [180, 160, 80, 120, 80, 80, 80, 160, 120]
         for i, w in enumerate(widths):
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
             self._jobs_table.setColumnWidth(i, w)
@@ -181,8 +181,9 @@ class DataWindow(QWidget):
             table.setItem(i, 3, QTableWidgetItem(loc_text))
             table.setItem(i, 4, QTableWidgetItem(j.status))
             table.setItem(i, 5, QTableWidgetItem(j.account))
-            table.setItem(i, 6, QTableWidgetItem(j.applied_at.replace("T", " ")[:16] if j.applied_at else ""))
-            table.setItem(i, 7, QTableWidgetItem(j.note))
+            table.setItem(i, 6, QTableWidgetItem(j.dispatched_by))
+            table.setItem(i, 7, QTableWidgetItem(j.applied_at.replace("T", " ")[:16] if j.applied_at else ""))
+            table.setItem(i, 8, QTableWidgetItem(j.note))
             table.item(i, 0).setData(Qt.ItemDataRole.UserRole, j.job_id)
         table.setSortingEnabled(True)
         total = len(self._storage.search_jobs())
@@ -291,7 +292,7 @@ class DataWindow(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "导出 CSV", "jobs.csv", "CSV (*.csv)")
         if not path:
             return
-        fieldnames = ["title", "company", "salary_raw", "location", "status", "account", "applied_at", "href", "note"]
+        fieldnames = ["title", "company", "salary_raw", "location", "status", "account", "dispatched_by", "applied_at", "href", "note"]
 
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)

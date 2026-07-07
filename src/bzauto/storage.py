@@ -136,7 +136,7 @@ class Storage:
         result = self._jobs.update(
             {
                 "dispatch_status": DispatchStatus.CLAIMED,
-                "account": account_id,
+                "dispatched_by": account_id,
                 "dispatched_at": now,
                 "last_updated": now,
             },

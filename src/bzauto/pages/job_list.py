@@ -37,6 +37,8 @@ _JOB_PROJECT = {
     "location": f"{_LOCATION}@text",
 }
 
+_CHAT_DETAIL_SELECTOR = "a.btn-startchat"
+
 _DIALOG_SELECTORS = [
     ".greet-boss-dialog .cancel-btn",
     ".dialog-close",
@@ -105,6 +107,13 @@ class BossJobListPage(BasePage):
             post_sleep=0.5,
         )
         return True
+
+    async def click_chat_on_detail(self) -> None:
+        """在独立职位详情页点击「立即沟通」按钮。"""
+        await self._session.click_element(
+            _CHAT_DETAIL_SELECTOR,
+            post_sleep=2.0,
+        )
 
     async def click_chat(self, index: int = 0) -> None:
         """等待沟通按钮出现后点击。"""

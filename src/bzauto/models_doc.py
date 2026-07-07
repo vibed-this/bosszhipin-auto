@@ -22,7 +22,8 @@ class JobDoc(BaseModel):
     :ivar company: 公司名称
     :ivar href: 职位详情链接
     :ivar location: 地点列表（如 ["长沙", "岳麓区", "望城坡"]）
-    :ivar account: 关联账号 ID
+    :ivar account: 采集账号 ID（记录谁采集的，写入后不变）
+    :ivar dispatched_by: 投递账号 ID（记录谁沟通的，由 claim 时设置）
     :ivar status: 业务状态文本（如 "已沟通"）
     :ivar dispatch_status: 派发状态（pending / claimed / success / failed）
     :ivar dispatched_at: 领取时间 ISO 格式
@@ -43,6 +44,7 @@ class JobDoc(BaseModel):
     href: str = ""
     location: list[str] = []
     account: str = ""
+    dispatched_by: str = ""
     status: str = ""
     dispatch_status: str = DispatchStatus.PENDING
     dispatched_at: str | None = None

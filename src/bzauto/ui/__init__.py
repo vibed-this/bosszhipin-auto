@@ -28,7 +28,6 @@ from bzauto.scheduler import (
     ScanTask,
     ScrapeChatTask,
     ScrapeTask,
-    ScrapeAndChatTask,
 )
 from bzauto.ui.control_panel import ControlPanel
 from bzauto.ui.log_window import LogWindow
@@ -203,7 +202,7 @@ class BzAutoApp:
         self._submit(ScrapeTask("main", self._storage))
 
     def _on_batch_chat(self) -> None:
-        self._submit(ScrapeAndChatTask("main", self._storage))
+        self._submit(DispatchTask("main", self._storage, get_config().schedule.dispatch_batch_size))
 
     def _on_delete_chat(self) -> None:
         self._submit(DeleteChatTask("main", self._storage))
@@ -331,7 +330,7 @@ class BzAutoApp:
             "扫描": ScanTask(account_id, storage),
             "聊天爬取": ScrapeChatTask(account_id, storage),
             "删拒": DeleteChatTask(account_id, storage),
-            "抓取沟通": ScrapeAndChatTask(account_id, storage),
+            "批量沟通": DispatchTask(account_id, storage, get_config().schedule.dispatch_batch_size),
         }
         return mapping[task_name]
 
