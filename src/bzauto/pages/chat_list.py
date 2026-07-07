@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 from typing import AsyncIterator
 
 from bzauto.browser.session import BrowserSession
@@ -30,6 +32,10 @@ _DROPDOWN_ITEM_SPAN = ".chat-conversation .ui-dropmenu-list li span"
 _DIALOG_WRAPPER = ".boss-dialog__wrapper"
 _DIALOG_CANCEL = ".boss-dialog__button.button-outline"
 _DIALOG_CONFIRM = ".boss-dialog__button:not(.button-outline)"
+
+_CHAT_NO_DATA_CONTAINER = ".chat-conversation .chat-no-data"
+_CHAT_INPUT = "div.chat-input"
+_CHAT_SEND = "button.btn-v2.btn-sure-v2.btn-send"
 
 _CHAT_PROJECT = {
     "name": f"{_NAME}@text",
@@ -191,3 +197,58 @@ class BossChatListPage(BasePage):
             wait_hidden=_DIALOG_WRAPPER,
             post_sleep=0.5,
         )
+
+    async def is_conversation_selected(self) -> bool:
+        """检查右侧是否已选中对话（.chat-no-data 消失 = 已选中）。"""
+        return await self._session.count(_CHAT_NO_DATA_CONTAINER) == 0
+
+    async def wait_conversation_selected(self, timeout: float = 10.0) -> bool:
+        """等待右侧选中一个对话。"""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if await self.is_conversation_selected():
+                return True
+            await asyncio.sleep(0.3)
+        return False
+
+    async def type_message(self, text: str) -> None:
+        """在聊天输入框中输入文本。
+
+        必须先选中任意对话（is_conversation_selected() 为 True），
+        否则输入框不存在。
+
+        通过 eval_js 设置 contentEditable div 的 innerText 并派发 input 事件
+        以触发 Vue 响应式更新。
+        """
+        await self._session.click_element(_CHAT_INPUT, post_sleep=0.3)
+        js = json.dumps({
+            "selector": _CHAT_INPUT,
+            "text": text,
+        })
+        await self._session.eval_js(f"""
+(function() {{
+    var o = {js};
+    var el = document.querySelector(o.selector);
+    if (!el) return;
+    el.focus();
+    el.innerText = o.text;
+    el.dispatchEvent(new Event('input', {{bubbles: true}}));
+}})()
+        """)
+        await asyncio.sleep(0.3)
+
+    async def click_send(self) -> None:
+        """点击发送按钮。
+
+        必须先选中任意对话且输入框内有内容，否则按钮为 .disabled 状态无法点击。
+        """
+        await self._session.click_element(_CHAT_SEND, post_sleep=1.0)
+
+    async def send_message(self, text: str) -> None:
+        """输入并发送消息。
+
+        必须先选中任意对话（is_conversation_selected() 为 True），
+        否则输入框不存在且发送按钮为 .disabled 状态。
+        """
+        await self.type_message(text)
+        await self.click_send()

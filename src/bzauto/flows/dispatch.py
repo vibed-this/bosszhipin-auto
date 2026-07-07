@@ -6,7 +6,9 @@ import logging
 import random
 
 from bzauto.browser.session import BrowserSession
+from bzauto.config import get_config
 from bzauto.flows.base import BaseFlow
+from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.storage import Storage
 
@@ -19,6 +21,7 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
     def __init__(self, page: BossJobListPage, session: BrowserSession, account_id: str, storage: Storage) -> None:
         super().__init__(page, session, account_id)
         self._storage = storage
+        self._chat_page = BossChatListPage(session)
         self._jobs_url = "https://www.zhipin.com/web/geek/jobs"
 
     async def run(self, batch_size: int = 50) -> dict:
@@ -56,14 +59,22 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
 
                 await self._page.click_card_at(idx)
                 await self._page.click_chat(idx)
-                await asyncio.sleep(random.uniform(1.0, 2.0))
 
-                result = await self._page.dismiss_dialogs()
-                if not result:
-                    log.warning("沟通上限已达，终止投递")
-                    self._storage.mark_job_failed(job_id)
-                    failed += 1
-                    break
+                # === 新流程：无打招呼语（平台侧未设置）→ 自动跳转聊天页 ===
+                greeting = get_config().scrape.greeting
+                await self._chat_page.wait_conversation_selected(timeout=10)
+                if greeting:
+                    await self._chat_page.send_message(greeting)
+                    log.info("已发送招呼语: %s — %s", job.title, job.company)
+
+                # === 旧流程：有打招呼语（平台侧已设置）→ 弹窗确认 ===
+                # await asyncio.sleep(random.uniform(1.0, 2.0))
+                # result = await self._page.dismiss_dialogs()
+                # if not result:
+                #     log.warning("沟通上限已达，终止投递")
+                #     self._storage.mark_job_failed(job_id)
+                #     failed += 1
+                #     break
 
                 self._storage.mark_job_success(job_id)
                 self._storage.increment_daily_count(self._account_id)

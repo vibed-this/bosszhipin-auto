@@ -52,11 +52,13 @@ class ScrapeConfig(BaseModel):
 
     :ivar scroll_timeout: 滚动超时（秒）
     :ivar page_load_timeout: 页面加载超时（秒）
+    :ivar greeting: 打招呼语，为空时不发送；非空时使用新流程（跳转聊天页 + 自动发送）
     :ivar filter: 过滤条件
     """
 
     scroll_timeout: float = 5.0
     page_load_timeout: float = 20.0
+    greeting: str = ""
     filter: ScrapeFilterConfig = ScrapeFilterConfig()
 
 
@@ -175,6 +177,7 @@ db_path = "data/bzauto.tinydb"
 [scrape]
 scroll_timeout = 5.0
 page_load_timeout = 20.0
+greeting = ""
 
 [scrape.filter]
 whitelist = ["前端", "全栈", "Web"]

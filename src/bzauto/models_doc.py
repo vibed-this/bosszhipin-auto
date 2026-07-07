@@ -28,6 +28,7 @@ class JobDoc(BaseModel):
     :ivar dispatched_at: 领取时间 ISO 格式
     :ivar applied_at: 沟通成功时间 ISO 格式
     :ivar last_updated: 最后更新时间 ISO 格式
+    :ivar job_desc: 职位描述文本（详情页抓取填充）
     :ivar note: 备注
     """
 
@@ -47,6 +48,7 @@ class JobDoc(BaseModel):
     dispatched_at: str | None = None
     applied_at: str | None = None
     last_updated: str = ""
+    job_desc: str = ""
     note: str = ""
 
 

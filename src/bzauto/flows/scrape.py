@@ -9,6 +9,7 @@ from bzauto.config import get_config
 from bzauto.browser.session import BrowserSession
 from bzauto.flows.base import BaseFlow
 from bzauto.models import JobCard, make_job_id
+from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.storage import Storage
 
@@ -21,11 +22,13 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
     def __init__(self, page: BossJobListPage, session: BrowserSession, account_id: str = "main", storage: Storage | None = None) -> None:
         super().__init__(page, session, account_id)
         self._storage = storage
+        self._chat_page = BossChatListPage(session)
         cfg = get_config()
         self._whitelist = cfg.scrape.filter.whitelist
         self._blacklist = cfg.scrape.filter.blacklist
         self._min_salary = cfg.scrape.filter.min_salary
         self._max_salary = cfg.scrape.filter.max_salary
+        self._greeting = cfg.scrape.greeting
         self._jobs_url = "https://www.zhipin.com/web/geek/jobs"
 
     def _iter_cards(
@@ -89,21 +92,34 @@ class BossScrapeFlow(BaseFlow[BossJobListPage]):
                 self._storage.add_seen_job_hrefs([card.href])
 
             # 沟通前检查配额
-            if self._storage:
-                remaining = self._storage.get_remaining_quota(self._account_id)
-                if remaining <= 0:
-                    log.info("配额已满，终止沟通")
-                    break
+            # if self._storage:
+            #     remaining = self._storage.get_remaining_quota(self._account_id)
+            #     if remaining <= 0:
+            #         log.info("配额已满，终止沟通")
+            #         break
 
             await self._page.click_card_at(idx)
 
             await self._page.click_chat(idx)
-            await asyncio.sleep(random.uniform(1.0, 2.0))
 
-            result = await self._page.dismiss_dialogs()
-            if not result:
-                log.warning("每日沟通上限已达，终止抓取")
-                break
+            # === 新流程：无打招呼语（平台侧未设置）→ 自动跳转聊天页 ===
+            await self._chat_page.wait_conversation_selected(timeout=10)
+            if self._greeting:
+                await self._chat_page.send_message(self._greeting)
+                log.info("已发送招呼语: %s — %s", card.title, card.company)
+
+            # 跳回列表页，继续下一个卡片
+            await self._session.ensure_tab(self._jobs_url, reuse_existing=True)
+            await asyncio.sleep(1.0)
+
+            # === 旧流程：有打招呼语（平台侧已设置）→ 弹窗确认 ===
+            # await self._page.click_card_at(idx)
+            # await self._page.click_chat(idx)
+            # await asyncio.sleep(random.uniform(1.0, 2.0))
+            # result = await self._page.dismiss_dialogs()
+            # if not result:
+            #     log.warning("每日沟通上限已达，终止抓取")
+            #     break
 
             if self._storage:
                 self._storage.mark_job_success(make_job_id(card.href))

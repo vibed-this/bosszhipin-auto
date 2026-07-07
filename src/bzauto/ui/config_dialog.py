@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
     QTabWidget,
@@ -77,10 +78,14 @@ class ConfigDialog(QDialog):
         self._spin_min_salary.setRange(0, 100)
         self._spin_max_salary = QSpinBox()
         self._spin_max_salary.setRange(0, 100)
+        self._edit_greeting = QPlainTextEdit()
+        self._edit_greeting.setPlaceholderText("留空 = 不发送招呼语，非空 = 自动跳转聊天页并发送此消息")
+        self._edit_greeting.setMaximumHeight(80)
         layout.addRow("白名单（逗号分隔）", self._edit_whitelist)
         layout.addRow("黑名单（逗号分隔）", self._edit_blacklist)
         layout.addRow("薪资下限 (K)", self._spin_min_salary)
         layout.addRow("薪资上限 (K)", self._spin_max_salary)
+        layout.addRow("打招呼语", self._edit_greeting)
 
     def _build_schedule_tab(self):
         layout = QFormLayout(self._tab_schedule)
@@ -134,6 +139,7 @@ class ConfigDialog(QDialog):
         self._edit_blacklist.setText(", ".join(cfg.scrape.filter.blacklist))
         self._spin_min_salary.setValue(cfg.scrape.filter.min_salary)
         self._spin_max_salary.setValue(cfg.scrape.filter.max_salary)
+        self._edit_greeting.setPlainText(cfg.scrape.greeting)
         self._edit_dispatch_times.setText(", ".join(cfg.schedule.dispatch_times))
         self._spin_batch_size.setValue(cfg.schedule.dispatch_batch_size)
         self._spin_scan_interval.setValue(cfg.schedule.scan_interval_minutes)
@@ -152,6 +158,7 @@ class ConfigDialog(QDialog):
         cfg.scrape.filter.blacklist = [s.strip() for s in self._edit_blacklist.text().split(",") if s.strip()]
         cfg.scrape.filter.min_salary = self._spin_min_salary.value()
         cfg.scrape.filter.max_salary = self._spin_max_salary.value()
+        cfg.scrape.greeting = self._edit_greeting.toPlainText()
         times = [s.strip() for s in self._edit_dispatch_times.text().split(",") if s.strip()]
         if times:
             cfg.schedule.dispatch_times = times
