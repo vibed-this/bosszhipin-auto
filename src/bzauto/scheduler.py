@@ -212,8 +212,8 @@ class BzScheduler:
         if nxt is not None:
             kwargs["next_run_time"] = nxt
         self._scheduler.add_job(
-            self._trigger_delete_chat, 'cron', id="delete_chat",
-            **parse_cron_time(cfg.delete_chat_time), **kwargs,
+            self._trigger_delete_chat, 'interval', id="delete_chat",
+            hours=1, **kwargs,
         )
 
         self._scheduler.add_listener(
