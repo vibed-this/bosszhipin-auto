@@ -8,27 +8,14 @@ from dataclasses import asdict
 from pathlib import Path
 
 from bzauto.browser.session import BrowserSession
-from bzauto.enums import ConvStatus, MsgType
+from bzauto.enums import MsgType
 from bzauto.flows.base import BaseFlow
-from bzauto.models import ChatItem, classify_msg_type, is_older_than_week
+from bzauto.models import ChatItem, classify_msg_type
 from bzauto.pages.chat_list import BossChatListPage, _CHAT_URL
 from bzauto.results import ScrapeChatResult
 from bzauto.storage import Storage
 
 log = logging.getLogger("flow.scrape_chat")
-
-
-def infer_status(sender: str, unread_count: int, old_status: str, last_msg_time: str = "") -> str:
-    """推断行动性状态，不涉及消息内容分类。"""
-    if old_status == ConvStatus.CLOSED:
-        return ConvStatus.CLOSED
-    if sender == "self":
-        return ConvStatus.NONE
-    if unread_count > 0:
-        if is_older_than_week(last_msg_time):
-            return ConvStatus.FOLLOW_UP
-        return ConvStatus.PENDING
-    return ConvStatus.NONE
 
 
 class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
@@ -59,33 +46,23 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
 
         storage = self._storage
 
-        async for item, _idx in self._page.iter_chat_items():
+        async for item in self._page.iter_chat_items():
             all_items.append(item)
             log.info("消息：%s·%s %s", item.name, item.company, item.time)
 
-            if storage:
-                conv_doc = item.to_doc(self._account_id)
-                conv_id = conv_doc.conv_id
-
-                # 查旧状态（upsert 会覆写 status，必须提前查）
-                existing = storage.get_conversation(conv_id, self._account_id)
-                old_status = existing.status or ConvStatus.NONE if existing else ConvStatus.NONE
-
-                result = storage.upsert_conversation(conv_doc)
-                if result is True:
-                    new_count += 1
-                elif result is False:
-                    updated_count += 1
-
-                status = infer_status(item.sender, item.unread_count, old_status, conv_doc.last_msg_time)
-                storage.update_conv_status(conv_id, self._account_id, status)
-
-                if classify_msg_type(item.lastMsg, item.sender, item.status) is MsgType.REJECTION:
-                    rejections.append(item)
-                if item.sender == "other" and item.unread_count > 0:
-                    unread.append(item)
+            if classify_msg_type(item.lastMsg, item.sender, item.status) is MsgType.REJECTION:
+                rejections.append(item)
+            if item.sender == "other" and item.unread_count > 0:
+                unread.append(item)
 
         log.info("爬取完成: 共 %d 条聊天记录", len(all_items))
+
+        # 一次性批量写入 DB
+        if storage and all_items:
+            new_count, updated_count = storage.batch_upsert_conversations(
+                self._account_id, all_items,
+            )
+            log.info("DB 写入完成: 新增 %d, 更新 %d", new_count, updated_count)
 
         if output:
             path = Path(output)

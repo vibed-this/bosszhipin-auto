@@ -24,7 +24,7 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
     """遍历消息列表，删除符合条件的聊天记录。
 
     支持两种模式：
-    1. DB 驱动（优先）：从 storage 获取拒信列表，按 name+company 匹配删除
+    1. DB 驱动（优先）：从 storage 获取拒信列表，按 unique_id 或 name+company 匹配
     2. 关键词 fallback：页面上有新拒信时关键词匹配删除
     """
 
@@ -42,35 +42,35 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
 
         await self._setup(url or _CHAT_URL)
 
-        processed: set[tuple[str, str]] = set()
+        processed: set[str] = set()
         deleted: list[ChatItem] = []
 
-        # 收集 DB 中待删对话（按 msg_type 筛选）
-        db_targets: set[tuple[str, str]] = set()
+        # 收集 DB 中待删对话（按 msg_type 筛选），优先用 unique_id
+        db_targets: dict[str, str] = {}  # unique_id -> conv_id
+        db_fallback_keys: set[tuple[str, str]] = set()  # (name, company) fallback
         if self._storage:
             for conv in self._storage.get_conversations(account=self._account_id):
                 if classify_msg_type(conv.last_msg, conv.sender, conv.platform_status) is MsgType.REJECTION:
-                    if conv.name and conv.company:
-                        db_targets.add((conv.name, conv.company))
+                    if conv.unique_id:
+                        db_targets[conv.unique_id] = conv.conv_id
+                    elif conv.name and conv.company:
+                        db_fallback_keys.add((conv.name, conv.company))
 
-        async for item, idx in self._page.iter_chat_items():
-            if item.name and item.company:
-                key = (item.name, item.company)
-            else:
-                key = ("", "")
-
-            if key in processed:
+        async for item in self._page.iter_chat_items():
+            uid = item.uniqueId
+            if not uid or uid in processed:
                 continue
 
+            key = (item.name, item.company)
             msg_type = classify_msg_type(item.lastMsg, item.sender, item.status)
-            should_del = key in db_targets or _should_delete(msg_type)
+            should_del = uid in db_targets or key in db_fallback_keys or _should_delete(msg_type)
 
             if should_del:
-                processed.add(key)
-                log.info("--- 处理 #%d: %s ---", idx, item.name)
+                processed.add(uid)
+                log.info("--- 处理: %s %s/%s ---", uid, item.name, item.company)
 
                 try:
-                    await self._page.click_chat_item(idx)
+                    await self._page.click_chat_item(uid)
                 except Exception:
                     continue
                 await asyncio.sleep(random.uniform(0.5, 1.0))
@@ -101,10 +101,13 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
                 deleted.append(item)
 
                 # DB 标记已删除
-                if self._storage and key in db_targets and item.name and item.company:
-                    from bzauto.models import make_conv_id
-                    cid = make_conv_id(self._account_id, item.name, item.company)
-                    self._storage.mark_deleted(cid, self._account_id)
+                if self._storage:
+                    cid = db_targets.get(uid)
+                    if not cid and item.name and item.company:
+                        from bzauto.models import make_conv_id
+                        cid = make_conv_id(self._account_id, item.name, item.company)
+                    if cid:
+                        self._storage.mark_deleted(cid, self._account_id)
 
         log.info("完成: 共处理 %d 条", len(deleted))
         return deleted

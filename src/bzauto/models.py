@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 import logging
 
-from bzauto.enums import MsgType
+from bzauto.enums import ConvStatus, MsgType
 from bzauto.models_doc import ConvDoc, JobDoc
 
 log = logging.getLogger(__name__)
@@ -187,11 +187,13 @@ class ChatItem:
     :ivar name: 招聘者姓名
     :ivar company: 公司名称
     :ivar position: 招聘职位
-    :ivar time: 最后消息时间文本
+    :ivar time: 最后消息时间文本（DOM 来源）或时间戳字符串（Vue 来源）
     :ivar lastMsg: 最后一条消息文本
     :ivar status: BOSS 平台状态文本（如 "已读"）
     :ivar sender: 发送方标识 ("self" | "other")
     :ivar unread_count: 未读消息数（0=已读, >0=对方未读条数, -1=未知）
+    :ivar uniqueId: Vue 侧唯一标识（{uid}-{friendSource}）
+    :ivar jobId: Boss 直聘职位数字 ID
     """
 
     name: str
@@ -202,6 +204,8 @@ class ChatItem:
     status: str = ""
     sender: str = ""        # "self" | "other"
     unread_count: int = 0   # 0=已读, >0=对方未读条数, -1=未知
+    uniqueId: str = ""
+    jobId: int = 0
 
     @classmethod
     def from_query_row(cls, row: dict[str, Any]) -> ChatItem:
@@ -232,6 +236,55 @@ class ChatItem:
             unread_count=unread_count,
         )
 
+    @classmethod
+    def from_vue_row(cls, row: dict[str, Any]) -> ChatItem:
+        """从 Vue __vue__.$props.source 构建 ChatItem。
+
+        :param row: Vue source 原始 dict
+        :returns: ChatItem 实例
+        """
+        name = row.get("name") or ""
+        company = row.get("brandName") or ""
+        position = row.get("title") or ""
+        last_msg = row.get("lastText") or ""
+        last_is_self = row.get("lastIsSelf", False)
+        sender = "self" if last_is_self else "other"
+        unread = row.get("unreadCount") or 0
+        unique_id = row.get("uniqueId") or ""
+        job_id = row.get("jobId") or 0
+        last_msg_status = row.get("lastMsgStatus")
+
+        # 毫秒时间戳 → ISO 格式
+        last_ts = row.get("lastTS") or 0
+        if last_ts:
+            time_str = datetime.datetime.fromtimestamp(last_ts / 1000).isoformat()
+        else:
+            time_str = ""
+
+        status = ""
+        if last_msg_status == 2:
+            status = "已读"
+        elif last_msg_status == 1:
+            status = "送达"
+
+        # 文件消息覆写 sender / unread_count
+        if last_msg.lower().endswith(".pdf"):
+            sender = "self"
+            unread = -1
+
+        return cls(
+            name=name,
+            company=company,
+            position=position,
+            time=time_str,
+            lastMsg=last_msg,
+            status=status,
+            sender=sender,
+            unread_count=unread,
+            uniqueId=unique_id,
+            jobId=job_id,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """转为普通 dict（序列化用）。"""
         return asdict(self)
@@ -256,6 +309,7 @@ class ChatItem:
             platform_status=self.status,
             sender=self.sender,
             unread_count=self.unread_count,
+            unique_id=self.uniqueId,
         )
 
 
@@ -305,7 +359,20 @@ def classify_msg_type(last_msg: str, sender: str, platform_status: str = "") -> 
             return MsgType.SYSTEM
         if last_msg.startswith("您好") and platform_status == "已读":
             return MsgType.REJECTION
-        return MsgType.NORMAL
+    return MsgType.NORMAL
+
+
+def infer_status(sender: str, unread_count: int, old_status: str, last_msg_time: str = "") -> str:
+    """推断行动性状态，不涉及消息内容分类。"""
+    if old_status == ConvStatus.CLOSED:
+        return ConvStatus.CLOSED
+    if sender == "self":
+        return ConvStatus.NONE
+    if unread_count > 0:
+        if is_older_than_week(last_msg_time):
+            return ConvStatus.FOLLOW_UP
+        return ConvStatus.PENDING
+    return ConvStatus.NONE
 
     if any(kw in last_msg for kw in _REJECTION_KWS):
         return MsgType.REJECTION

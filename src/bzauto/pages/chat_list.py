@@ -7,7 +7,7 @@ import logging
 import time
 from typing import AsyncIterator
 
-from bzauto.browser.session import BrowserSession
+from bzauto.browser.session import BrowserSession, ElementNotFound
 from bzauto.models import ChatItem
 from bzauto.pages.base import BasePage
 
@@ -15,12 +15,6 @@ log = logging.getLogger("page.chat_list")
 
 _CHAT_URL = "https://www.zhipin.com/web/geek/chat"
 
-_LIST_ITEM = "li[role='listitem']"
-_NAME = ".name-text"
-_NAME_BOX = ".name-box"
-_TIME = ".text .time"
-_MSG = ".last-msg-text"
-_STATUS = ".message-status"
 _LABEL_LIST = ".label-list li .label-name"
 _FOOTER = ".boss-list-footer .finished"
 _CHAT_NO_DATA = ".chat-no-data .no-data-text"
@@ -37,21 +31,6 @@ _CHAT_NO_DATA_CONTAINER = ".chat-conversation .chat-no-data"
 _CHAT_INPUT = "div.chat-input"
 _CHAT_SEND = "button.btn-v2.btn-sure-v2.btn-send"
 
-_CHAT_PROJECT = {
-    "name": f"{_NAME}@text",
-    "company": f"{_NAME_BOX} span:nth-child(2)@text",
-    "position": f"{_NAME_BOX} span:nth-child(4)@text",
-    "time": f"{_TIME}@text",
-    "lastMsg": f"{_MSG}@text",
-    "firstChildClass": ".gray.last-msg > :first-child@class",
-    "unreadCount": ".notice-badge@text",
-}
-
-_CHAT_PROJECT_WITH_STATUS = {
-    **_CHAT_PROJECT,
-    "status": f"{_STATUS}@text",
-}
-
 
 class BossChatListPage(BasePage):
     """Boss直聘聊天列表页面对象（选择器 + 操作方法）。"""
@@ -64,49 +43,68 @@ class BossChatListPage(BasePage):
 
     async def get_chat_items(
         self,
-        limit: int = 50,
+        limit: int = 999,
         *,
         include_status: bool = False,
     ) -> list[ChatItem]:
-        project = _CHAT_PROJECT_WITH_STATUS if include_status else _CHAT_PROJECT
-        raw = await self._session.find_all(
-            select=_LIST_ITEM,
-            project=project,
-        )
+        """从 Vue dataSources 读取聊天列表项。
+
+        :param limit: 返回上限
+        :param include_status: 已弃用，保留兼容
+        :returns: ChatItem 列表
+        """
+        raw = await self._session.eval_js("""
+JSON.stringify((function() {
+    var el = document.querySelector('.user-list-content');
+    if (!el || !el.__vue__) return [];
+    var ds = el.__vue__.$props && el.__vue__.$props.dataSources;
+    if (!Array.isArray(ds)) return [];
+    return ds.map(function(s) {
+        return {
+            name: s.name,
+            brandName: s.brandName,
+            title: s.title,
+            lastText: s.lastText,
+            lastTS: s.lastTS,
+            lastMsgStatus: s.lastMsgStatus,
+            unreadCount: s.unreadCount,
+            lastIsSelf: s.lastIsSelf,
+            uniqueId: s.uniqueId,
+            jobId: s.jobId,
+        };
+    });
+})())
+        """)
         if not raw:
             return []
-        return [ChatItem.from_query_row(item) for item in raw[:limit]]
+        items = json.loads(raw) if isinstance(raw, str) else raw
+        return [ChatItem.from_vue_row(item) for item in items[:limit]]
 
     async def get_chat_item_at(self, index: int) -> ChatItem | None:
-        raw = await self._session.find_one(
-            select=_LIST_ITEM,
-            filter={"index": index},
-            project=_CHAT_PROJECT_WITH_STATUS,
-        )
-        if not raw:
-            return None
-        return ChatItem.from_query_row(raw)
+        """按 dataSources 索引获取单项（兼容旧接口）。"""
+        items = await self.get_chat_items(limit=index + 1)
+        return items[index] if index < len(items) else None
 
     async def iter_chat_items(
         self,
         *,
         scroll_timeout: float = 5.0,
-    ) -> AsyncIterator[tuple[ChatItem, int]]:
-        """全量捞取当前可见聊天项，滚动后捞取新项，按 (name, company) 去重。"""
+    ) -> AsyncIterator[ChatItem]:
+        """全量捞取 dataSources，滚动补全后依次 yield 不重复项。"""
         max_scrolls = 3
-        seen: set[tuple[str, str]] = set()
+        seen: set[str] = set()
         scroll_count = 0
 
         while True:
-            items = await self.get_chat_items(limit=999, include_status=True)
+            items = await self.get_chat_items(limit=999)
 
             new_found = False
             for item in items:
-                key = (item.name, item.company)
-                if key not in seen:
-                    seen.add(key)
+                uid = item.uniqueId
+                if uid and uid not in seen:
+                    seen.add(uid)
                     new_found = True
-                    yield item, len(seen) - 1
+                    yield item
 
             if new_found:
                 scroll_count = 0
@@ -161,13 +159,38 @@ class BossChatListPage(BasePage):
             return items[0].get("text")
         return None
 
-    async def click_chat_item(self, index: int = 0) -> None:
-        await self._session.click_element(
-            _LIST_ITEM,
-            filter={"index": index},
-            wait_visible=_TOP_INFO,
-            post_sleep=0.5,
-        )
+    async def click_chat_item(self, unique_id: str) -> None:
+        """通过 uniqueId 定位并点击聊天项。
+
+        :param unique_id: Vue 侧的 uniqueId（{uid}-{friendSource}）
+        """
+        bbox_raw = await self._session.eval_js(f"""
+JSON.stringify((function() {{
+    var uid = {json.dumps(unique_id)};
+    var items = document.querySelectorAll('li[role="listitem"]');
+    for (var i = 0; i < items.length; i++) {{
+        var src = items[i].__vue__ && items[i].__vue__.$props && items[i].__vue__.$props.source;
+        if (src && src.uniqueId === uid) {{
+            items[i].scrollIntoView({{block: 'nearest', behavior: 'instant'}});
+            var rect = items[i].getBoundingClientRect();
+            return {{x: rect.x, y: rect.y, w: rect.width, h: rect.height, cx: Math.round(rect.x + rect.width / 2), cy: Math.round(rect.y + rect.height / 2)}};
+        }}
+    }}
+    return null;
+}})())
+        """)
+        bbox = bbox_raw if isinstance(bbox_raw, dict) else (json.loads(bbox_raw) if bbox_raw else None)
+        if not bbox or bbox.get("cx", 0) <= 0:
+            raise ElementNotFound(f"li[uniqueId={unique_id}]")
+        await self._session.click(int(bbox["cx"]), int(bbox["cy"]))
+        await asyncio.sleep(0.5)
+        # 等待右侧对话面板出现
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            check = await self._session.bbox(_TOP_INFO, timeout=3.0)
+            if check is not None:
+                break
+            await asyncio.sleep(0.3)
 
     async def click_more_button(self) -> None:
         await self._session.click_element(

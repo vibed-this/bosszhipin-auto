@@ -73,6 +73,9 @@ class ConvDoc(BaseModel):
     :ivar first_seen_at: 首次发现时间 ISO 格式
     :ivar last_updated: 最后更新时间 ISO 格式
     :ivar note: 备注
+    :ivar unique_id: Vue 侧唯一标识（uid-friendSource）
+    :ivar encrypt_boss_id: 加密 Boss ID
+    :ivar encrypt_job_id: 加密职位 ID
     """
 
     model_config = ConfigDict(use_enum_values=True)
@@ -93,6 +96,9 @@ class ConvDoc(BaseModel):
     first_seen_at: str = ""
     last_updated: str = ""
     note: str = ""
+    unique_id: str = ""
+    encrypt_boss_id: str = ""
+    encrypt_job_id: str = ""
 
 
 class AccountDoc(BaseModel):

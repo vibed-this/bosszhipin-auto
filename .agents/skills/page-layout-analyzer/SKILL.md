@@ -55,12 +55,18 @@ with loop:
 
 ### 2. Run JS probes via `eval_js`
 
+> **⚠️ 关键：`eval_js` 内部用 `page.runJavaScript(code, callback)`，必须在代码中使用"表达式"而非顶层 `return` 语句。**
+> - **正确**：`eval_js("document.title")` / `eval_js("42")` / `eval_js("JSON.stringify(obj)")`
+> - **错误**：`eval_js("return document.title")` — 顶层 `return` 是 JS 语法错误，返回空串
+> - IIFE（`(function(){ ... return val; })()`）内部的 `return` 可以正常工作，但为了简洁推荐直接用表达式
+
 **Find scrollable container** — trace element ancestry to locate `overflowY: auto/scroll` + `scrollHeight > clientHeight`:
 
 ```javascript
-// Trace ancestry of a target element
+// 直接用 IIFE 表达式返回值，不用顶层 return
 (function() {
   var el = document.querySelector('li[role="listitem"]');
+  if (!el) return '(no element)';  // ← IIFE 内部 return 是 OK 的
   var parts = [];
   var depth = 0;
   while (el && depth < 10) {

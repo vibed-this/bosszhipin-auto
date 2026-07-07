@@ -300,6 +300,82 @@ class Storage:
             self._conversations.insert(data)
             return True
 
+    def batch_upsert_conversations(
+        self,
+        account_id: str,
+        items: list[ChatItem],
+    ) -> tuple[int, int]:
+        """批量写入全部聊天项——只读一次 + 只写一次。
+
+        :param account_id: 账号 ID
+        :param items: ChatItem 列表
+        :returns: (new_count, updated_count)
+        """
+        from bzauto.models import infer_status
+
+        table_name = self._conversations.name
+        storage = self._conversations.storage
+        raw = storage.read() or {}
+        table_data: dict[str, dict] = raw.get(table_name, {})
+
+        # 建立 conv_id → doc_id 索引（仅当前账号）
+        conv_to_docid: dict[str, str] = {}
+        for doc_id, doc in table_data.items():
+            if doc.get("account") == account_id and doc.get("conv_id"):
+                conv_to_docid[doc["conv_id"]] = doc_id
+
+        now = _now_iso()
+        new_count = 0
+        updated_count = 0
+        tracked_keys = {"last_msg", "last_msg_time", "platform_status", "sender", "unread_count", "position"}
+
+        for item in items:
+            doc = item.to_doc(account_id)
+            cid = doc.conv_id
+            existing_doc_id = conv_to_docid.get(cid)
+
+            if existing_doc_id:
+                existing = table_data[existing_doc_id]
+                old_status = existing.get("status", ConvStatus.NONE)
+                new_status = infer_status(item.sender, item.unread_count, old_status, doc.last_msg_time)
+
+                update_data = doc.model_dump(exclude={"conv_id", "account"}, exclude_none=True)
+                update_data = {k: v for k, v in update_data.items() if v != ""}
+                has_changes = any(
+                    key in update_data and str(update_data[key]) != str(existing.get(key, ""))
+                    for key in tracked_keys
+                )
+                status_changed = new_status != old_status
+                if not has_changes and not status_changed:
+                    continue
+                if status_changed:
+                    update_data["status"] = new_status
+                    update_data["status_changed_at"] = now
+                update_data["last_updated"] = now
+                table_data[existing_doc_id].update(update_data)
+                updated_count += 1
+            else:
+                data = doc.model_dump(exclude_none=True)
+                cid = doc.conv_id or make_conv_id(account_id, item.name, item.company)
+                data["conv_id"] = cid
+                data["account"] = account_id
+                data["first_seen_at"] = now
+                data["last_updated"] = now
+                # 推断首次状态
+                old_status = ConvStatus.NONE
+                new_status = infer_status(item.sender, item.unread_count, old_status, doc.last_msg_time)
+                data["status"] = new_status
+                data["status_changed_at"] = now
+                # 分配新 doc_id
+                max_id = max((int(k) for k in table_data.keys() if k.isdigit()), default=0)
+                new_id = str(max_id + 1)
+                table_data[new_id] = data
+                new_count += 1
+
+        raw[table_name] = table_data
+        storage.write(raw)
+        return new_count, updated_count
+
     def update_conv_note(self, conv_id: str, account: str, note: str) -> None:
         """更新对话备注。
 
