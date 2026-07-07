@@ -146,11 +146,11 @@ class BzAutoApp:
 
     def _on_manager_window_state_changed(self, state: Qt.WindowState) -> None:
         if state & Qt.WindowState.WindowMinimized:
-            self._control.showMinimized()
-            self._log_win.showMinimized()
+            self._control.hide()
+            self._log_win.hide()
         else:
-            self._control.showNormal()
-            self._log_win.showNormal()
+            self._control.show()
+            self._log_win.show()
 
     async def _async_stop(self) -> None:
         """协程版停止（被 keyboard 线程调用）。"""
