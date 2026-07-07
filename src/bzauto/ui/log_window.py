@@ -34,6 +34,7 @@ class LogWindow(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOn
         )
         self._text.setStyleSheet("QTextEdit { border: 0px; }")
+        self._text.document().setMaximumBlockCount(3000)
         layout.addWidget(self._text)
 
         # 日志文件 Handler
