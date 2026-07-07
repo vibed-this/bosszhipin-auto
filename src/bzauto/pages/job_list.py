@@ -184,6 +184,19 @@ class BossJobListPage(BasePage):
             if "今日" in text or "已累计" in text or "150" in text:
                 return False
 
+        still_on_detail = await self._session.eval_js("""(function(){
+            var el = document.querySelector('a.btn-startchat');
+            if (!el) return false;
+            var rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        })()""")
+        if still_on_detail:
+            log.info("  弹窗已关闭，仍在详情页，点击沟通按钮继续")
+            await self._session.click_element(
+                _CHAT_DETAIL_SELECTOR,
+                post_sleep=2.0,
+            )
+
         return True
 
     async def find_card_by_href(self, href: str) -> int:
