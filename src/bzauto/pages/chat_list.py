@@ -117,7 +117,7 @@ JSON.stringify((function() {
             scroll_count += 1
             log.info("无新数据，尝试智能滚动 #%d...", scroll_count)
 
-            # JS 多次滚至最底部触发懒加载
+            # 智能滚动：先滚到底部上方 300px，等 300ms 再滚到最底部
             await self._session.eval_js("""
 (function () {
     var c = document.querySelector('.user-list-content');
@@ -125,8 +125,12 @@ JSON.stringify((function() {
 
     var count = 0;
     var scroll = function () {
-        c.scrollTop = c.scrollHeight;
-        if (count++ < 5) {
+        if (count++ % 2 === 0) {
+            c.scrollTop = Math.max(0, c.scrollHeight - 300);
+        } else {
+            c.scrollTop = c.scrollHeight;
+        }
+        if (count < 10) {
             window.setTimeout(scroll, 300);
         }
     }
