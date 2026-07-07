@@ -37,6 +37,8 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
 
         log.info("开始投递: account=%s batch=%d", self._account_id, len(jobs))
 
+        await self._session.activate()
+
         success = 0
         failed = 0
 
