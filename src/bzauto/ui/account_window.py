@@ -340,7 +340,7 @@ class AccountWindow(QWidget):
             bm.load_url(account_id, "https://www.zhipin.com/web/geek/jobs")
 
     def _on_double_click(self, row: int, _col: int):
-        self._login(row)
+        pass
 
     def _context_menu(self, pos):
         item = self._table.itemAt(pos)
