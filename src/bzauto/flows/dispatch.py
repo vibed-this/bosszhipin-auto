@@ -50,7 +50,7 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
             try:
                 href = job.href
                 full_url = href if href.startswith("http") else f"https://www.zhipin.com{href}"
-                await self._session.ensure_tab(full_url, reuse_existing=True)
+                await self._session.ensure_tab(full_url)
 
                 await self._page.click_chat_on_detail()
 

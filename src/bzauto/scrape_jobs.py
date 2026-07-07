@@ -40,7 +40,6 @@ class BossJobsAuto:
         self,
         url: str | None = None,
         max_scrolls: int = 10,
-        reuse_existing: bool = False,
     ) -> list[JobCard]:
         accounts = [{"id": self._account_id, "name": self._account_id}]
         manager = BrowserManager(accounts)
@@ -51,7 +50,7 @@ class BossJobsAuto:
         page = BossJobListPage(session)
         flow = BossScrapeManualFlow(page, session, self._account_id, self._storage)
 
-        result = await flow.run(url, max_scrolls=max_scrolls, reuse_existing=reuse_existing)
+        result = await flow.run(url, max_scrolls=max_scrolls)
 
         manager.close()
         return result
@@ -72,7 +71,7 @@ def cli_main() -> None:
     async def _main():
         url = sys.argv[1] if len(sys.argv) > 1 else "https://www.zhipin.com/web/geek/jobs"
         auto = BossJobsAuto()
-        jobs = await auto.run(url, reuse_existing=True)
+        jobs = await auto.run(url)
         print(f"抓取到 {len(jobs)} 条职位")
 
     loop.create_task(_main())

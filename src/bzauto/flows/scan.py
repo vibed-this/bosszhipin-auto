@@ -25,7 +25,7 @@ class ChatScanFlow:
     async def run(self) -> ScrapeChatResult:
         url = "https://www.zhipin.com/web/geek/chat"
 
-        await self.session.ensure_tab(url, reuse_existing=True)
+        await self.session.ensure_tab(url)
 
         result = await self.scrape_flow.run()
 

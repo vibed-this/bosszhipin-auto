@@ -28,10 +28,9 @@ class BaseFlow(Generic[P]):
         self,
         url: str | None = None,
         *,
-        reuse_existing: bool = False,
         timeout: float = 20.0,
     ) -> bool:
-        await self._session.ensure_tab(url, reuse_existing=reuse_existing)
+        await self._session.ensure_tab(url)
         await self._session.activate()
         loaded = await self._page.wait_loaded(timeout=timeout)
         if not loaded:

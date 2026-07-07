@@ -40,7 +40,7 @@ class BossDeleteChatFlow(BaseFlow[BossChatListPage]):
     ) -> list[ChatItem]:
         from bzauto.pages.chat_list import _CHAT_URL
 
-        await self._setup(url or _CHAT_URL, reuse_existing=True)
+        await self._setup(url or _CHAT_URL)
 
         processed: set[tuple[str, str]] = set()
         deleted: list[ChatItem] = []

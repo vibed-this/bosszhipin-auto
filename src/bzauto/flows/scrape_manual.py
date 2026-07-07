@@ -52,10 +52,9 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
         max_scrolls: int = 10,
         min_salary: int | None = None,
         max_salary: int | None = None,
-        reuse_existing: bool = False,
         max_jobs: int = 0,
     ) -> list[JobCard]:
-        await self._setup(url or self._jobs_url, reuse_existing=reuse_existing)
+        await self._setup(url or self._jobs_url)
 
         log.info("切换到期望职位tab...")
         try:

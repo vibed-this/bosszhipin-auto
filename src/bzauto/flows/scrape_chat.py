@@ -45,7 +45,7 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
         *,
         output: str | Path | None = None,
     ) -> ScrapeChatResult:
-        await self._setup(url or self._chat_url, reuse_existing=True)
+        await self._setup(url or self._chat_url)
 
         # 等待消息列表未读红点载入
         log.info("等待消息列表未读红点载入...")

@@ -56,20 +56,13 @@ class BrowserSession:
     # ── 生命周期 ──
 
     async def ensure_tab(self, url: str | None = None, *,
-                         reuse_existing: bool = False,
                          timeout: float = 20.0) -> None:
-        """确保账号标签已加载指定 URL。
-
-        若 url 为 None 则不导航；若 reuse_existing 且当前 URL 相同则不复载。
-        """
+        """确保账号标签已加载指定 URL。若 url 为 None 则不导航。"""
         page = self._manager.get_page(self._account_id)
         if not page:
             raise RuntimeError(f"账号 {self._account_id} 没有页面")
 
         if url:
-            if reuse_existing and self.current_url == url:
-                log.debug("复用已有标签: url=%s", url)
-                return
             self._manager.load_url(self._account_id, url)
 
         loaded = await self._manager.wait_loaded(self._account_id, timeout=timeout)
