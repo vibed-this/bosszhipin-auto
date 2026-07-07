@@ -298,7 +298,6 @@ class ChatItem(BaseModel):
         """
         conv_id = make_conv_id(account_id, self.name, self.company)
         parsed_time = parse_chat_time(self.time)
-        log.debug("解析聊天时间：%s → %s", self.time, parsed_time)
         return ConvDoc(
             conv_id=conv_id,
             account=account_id,
