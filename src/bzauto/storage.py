@@ -609,11 +609,18 @@ class Storage:
         log.info("每日计数已检查/重置")
 
     def set_daily_count_maxed(self, account_id: str) -> None:
-        """保持当日计数不变（触发跨日检查的轻量操作）。
+        """将当日计数设为上限，使剩余配额归零。
 
         :param account_id: 账号 ID
         """
-        self.increment_daily_count(account_id, 0)
+        account = self._accounts.get(self._AccountQ.account_id == account_id)
+        if account is None:
+            return
+        limit = account.get("daily_limit", 150)
+        self._accounts.update(
+            {"daily_count": limit, "last_reset_date": _today_str()},
+            self._AccountQ.account_id == account_id,
+        )
 
     def set_account_daily_limit(self, account_id: str, limit: int) -> None:
         """设置账号每日上限。
