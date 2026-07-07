@@ -50,7 +50,10 @@ class TaskRunner:
                 self._current_exec = asyncio.create_task(task.execute())
                 result = await self._current_exec
                 if isinstance(task, _FutureTask):
-                    task.future.set_result(result)
+                    try:
+                        task.future.set_result(result)
+                    except asyncio.InvalidStateError:
+                        log.warning("future 已处于终态，忽略 set_result: %s", task.name)
             except asyncio.CancelledError:
                 if isinstance(task, _FutureTask):
                     try:
@@ -60,7 +63,10 @@ class TaskRunner:
             except Exception as e:
                 log.error("任务异常 (%s): %s", task.name, e)
                 if isinstance(task, _FutureTask):
-                    task.future.set_exception(e)
+                    try:
+                        task.future.set_exception(e)
+                    except asyncio.InvalidStateError:
+                        log.warning("future 已处于终态，忽略 set_exception: %s", task.name)
             finally:
                 self._current = None
                 self._current_exec = None
