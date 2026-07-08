@@ -77,10 +77,13 @@ with loop:
 
 ### 2. Run JS probes via `eval_js`
 
-> **⚠️ 关键：`eval_js` 内部用 `page.runJavaScript(code, callback)`，必须在代码中使用"表达式"而非顶层 `return` 语句。**
-> - **正确**：`eval_js("document.title")` / `eval_js("42")` / `eval_js("JSON.stringify(obj)")`
-> - **错误**：`eval_js("return document.title")` — 顶层 `return` 是 JS 语法错误，返回空串
-> - IIFE（`(function(){ ... return val; })()`）内部的 `return` 可以正常工作，但为了简洁推荐直接用表达式
+> **⚠️ 关键：`eval_js` 内部用 `page.runJavaScript(code, callback)`，必须遵守以下规则**
+> - **不得使用顶层 `return`**：`eval_js("return document.title")` 是 JS 语法错误，返回空串。
+> - **返回对象/数组时必须在外层包裹 `JSON.stringify(...)`**：Qt 的 `page.runJavaScript` 只可靠地返回字符串类型，IIFE 返回对象/数组时可能返回空串。
+>   - **正确**：`eval_js("JSON.stringify((function() { ... return {key: val}; })())")`
+>   - **错误**：`eval_js("(function() { ... return {key: val}; })()")` — 得到 `""`
+>   - **正确（简单值）**：`eval_js("document.title")` / `eval_js("42")`
+> - IIFE 内 `return` 正常工作，但返回值必须经 `JSON.stringify` 序列化。
 
 **Find scrollable container** — trace element ancestry to locate `overflowY: auto/scroll` + `scrollHeight > clientHeight`:
 
