@@ -155,6 +155,28 @@ class JobCard(BaseModel):
             location=row.get("location") or "",
         )
 
+    @classmethod
+    def from_vue_row(cls, row: dict[str, Any]) -> JobCard:
+        """从 Vue jobList 数据构建 JobCard。
+
+        :param row: Vue page-jobs-main.jobList 中的单个 job 对象
+        :returns: JobCard 实例
+        """
+        encrypt_job_id = row.get("encryptJobId") or ""
+        href = f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html" if encrypt_job_id else ""
+        location = "\u00B7".join(filter(None, [
+            row.get("cityName") or "",
+            row.get("areaDistrict") or "",
+            row.get("businessDistrict") or "",
+        ]))
+        return cls(
+            title=row.get("jobName") or "",
+            salary=row.get("salaryDesc") or "",
+            company=row.get("brandName") or "",
+            href=href,
+            location=location,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """转为普通 dict（序列化用）。"""
         return self.model_dump()

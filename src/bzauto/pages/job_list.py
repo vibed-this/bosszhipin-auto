@@ -37,6 +37,26 @@ _JOB_PROJECT = {
     "location": f"{_LOCATION}@text",
 }
 
+_VUE_EXTRACT_JS = """
+JSON.stringify((function() {
+    var el = document.querySelector('.page-jobs-main');
+    if (!el || !el.__vue__) return null;
+    var list = el.__vue__.jobList;
+    if (!Array.isArray(list)) return null;
+    return list.map(function(j) {
+        return {
+            jobName: j.jobName,
+            salaryDesc: j.salaryDesc,
+            brandName: j.brandName,
+            encryptJobId: j.encryptJobId,
+            cityName: j.cityName,
+            areaDistrict: j.areaDistrict,
+            businessDistrict: j.businessDistrict,
+        };
+    });
+})())
+"""
+
 _CHAT_DETAIL_SELECTOR = "a.btn-startchat"
 
 _DIALOG_SELECTORS = [
@@ -74,6 +94,14 @@ class BossJobListPage(BasePage):
     def __init__(self, session: BrowserSession) -> None:
         super().__init__(session)
         self._session: BrowserSession = session
+
+    async def get_job_cards_from_vue(self) -> list[JobCard]:
+        """从 Vue page-jobs-main.jobList 读取所有职位卡片。"""
+        raw = await self._session.eval_js(_VUE_EXTRACT_JS)
+        if not raw:
+            return []
+        items = json.loads(raw) if isinstance(raw, str) else raw
+        return [JobCard.from_vue_row(item) for item in items]
 
     async def get_job_cards(self) -> list[JobCard]:
         cards = await self._session.find_all(
@@ -240,25 +268,27 @@ class BossJobListPage(BasePage):
         scroll_timeout: float = 5.0,
         max_jobs: int = 0,
     ) -> AsyncIterator[tuple[JobCard, int]]:
-        """异步迭代器：逐个产出职位卡片，自动处理翻页和智能滚动。"""
+        """异步迭代器：逐个产出职位卡片，自动处理翻页和智能滚动。
+
+        基于 Vue __vue__.jobList 数据源（优先），回退到 DOM 查询。
+        """
         emitted = 0
         index = 0
         scroll_count = 0
         stale_rounds = 0
         max_stale = 3
 
+        vue_items: list[JobCard] = await self.get_job_cards_from_vue()
+
         while True:
             if max_jobs > 0 and emitted >= max_jobs:
                 log.info("已达采集上限 %d", max_jobs)
                 break
 
-            card = await self.get_job_card_at(index)
-
-            if card is None:
+            if index >= len(vue_items):
                 if scroll_count >= max_scrolls:
                     log.info("已达最大滚动次数 %d", max_scrolls)
                     break
-
                 if stale_rounds >= max_stale:
                     log.info("连续 %d 轮无新数据，停止", max_stale)
                     break
@@ -276,8 +306,13 @@ class BossJobListPage(BasePage):
                     "})()"
                 )
                 await asyncio.sleep(10)
+
+                vue_items = await self.get_job_cards_from_vue()
+                if index < len(vue_items):
+                    stale_rounds = 0
                 continue
 
+            card = vue_items[index]
             stale_rounds = 0
             scroll_count = 0
             emitted += 1
