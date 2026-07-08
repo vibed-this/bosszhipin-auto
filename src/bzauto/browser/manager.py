@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt, QUrl, Signal, QEvent
-from PySide6.QtGui import QShowEvent, QWindowStateChangeEvent
+from PySide6.QtGui import QColor, QShowEvent, QWindowStateChangeEvent
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QMainWindow, QMenu, QPushButton, QSplitter, QTabWidget, QVBoxLayout, QWidget
@@ -70,6 +70,7 @@ class _AccountTab:
         self.forward_btn = forward_btn
         self.refresh_btn = refresh_btn
         self.nav_btn = nav_btn
+        self.unread_count: int = 0
 
 
 class BrowserManager(QMainWindow):
@@ -262,6 +263,26 @@ class BrowserManager(QMainWindow):
                 atab.view.setFocus()
                 return
         log.warning("账号 %s 不存在", account_id)
+
+    def update_tab_badge(self, account_id: str, count: int) -> None:
+        """更新指定账号 tab 的未读消息角标和背景色。"""
+        atab = self._account_tabs.get(account_id)
+        if not atab:
+            return
+        if count == atab.unread_count:
+            return
+        atab.unread_count = count
+        container = atab.view.parent()
+        idx = self._tabs.indexOf(container)
+        if idx < 0:
+            return
+        bar = self._tabs.tabBar()
+        if count > 0:
+            bar.setTabText(idx, f"{atab.name} ({count})")
+            bar.setTabTextColor(idx, QColor("#E67E22"))
+        else:
+            bar.setTabText(idx, atab.name)
+            bar.setTabTextColor(idx, bar.palette().windowText().color())
 
     def get_account_tab(self, account_id: str) -> _AccountTab | None:
         return self._account_tabs.get(account_id)
