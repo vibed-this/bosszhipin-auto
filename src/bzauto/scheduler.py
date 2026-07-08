@@ -130,23 +130,17 @@ class ScrapeChatTask(ScheduledTask):
         return await flow.run()
 
     def format_result(self, result: ScrapeChatResult) -> list[str] | None:
-        updates = result.new + result.updated
-        if updates == 0:
+        if not result.unread:
             return None
 
+        updates = result.new + result.updated
         lines = [f"更新 {updates} 条。未读 {len(result.unread)}，拒信 {len(result.rejections)}"]
 
-        if result.invite_resume:
-            lines.append("")
-            lines.append(f"📎 邀投简历 ({len(result.invite_resume)})")
-            for item in result.invite_resume:
-                lines.append(f"  {item.name}·{item.company}")
-
-        if result.invite_interview:
-            lines.append("")
-            lines.append(f"📅 邀面试 ({len(result.invite_interview)})")
-            for item in result.invite_interview:
-                lines.append(f"  {item.name}·{item.company}")
+        lines.append("")
+        lines.append(f"📩 未读消息 ({len(result.unread)})")
+        for item in result.unread:
+            msg = (item.lastMsg[:60] + "...") if len(item.lastMsg) > 60 else item.lastMsg
+            lines.append(f"  {item.name}·{item.company}: {msg}")
 
         return lines
 
@@ -405,21 +399,20 @@ class BzScheduler:
     async def _trigger_scrape_chat(self) -> None:
         accounts = self._storage.accounts.list(enabled_only=True)
         agg = NotificationAggregator(get_notifier(), f"消息扫描 {datetime.datetime.now():%m-%d %H:%M}")
-        any_update = False
+        any_unread = False
         for acc in accounts:
             task = ScrapeChatTask(acc.account_id, self._storage)
             result = await self._run_and_record("消息扫描", acc, task)
             lines = task.format_result(result)
-            if lines is None:
-                log.info("[消息扫描] %s 无更新", acc.name or acc.account_id)
-                agg.add_section(acc.name or acc.account_id, ["无更新"])
-            else:
-                any_update = True
+            if lines is not None:
+                any_unread = True
                 agg.add_section(acc.name or acc.account_id, lines)
-        if any_update:
+            else:
+                log.info("[消息扫描] %s 无未读消息", acc.name or acc.account_id)
+        if any_unread:
             await agg.flush()
         else:
-            log.info("[消息扫描] 全部账号无更新，跳过通知")
+            log.info("[消息扫描] 全部账号无未读消息，跳过通知")
 
     async def _trigger_delete_chat(self) -> None:
         accounts = self._storage.accounts.list(enabled_only=True)
