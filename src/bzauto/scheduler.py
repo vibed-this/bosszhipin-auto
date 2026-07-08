@@ -159,8 +159,11 @@ class DeleteChatTask(ScheduledTask):
         flow = BossDeleteChatFlow(page, session, self._account_id, self._storage)
         return {"deleted": len(await flow.run(dry_run=False))}
 
-    def format_result(self, result: dict[str, Any]) -> list[str]:
-        return [f"删除 {result.get('deleted', 0)} 条"]
+    def format_result(self, result: dict[str, Any]) -> list[str] | None:
+        deleted = result.get("deleted", 0)
+        if deleted == 0:
+            return None
+        return [f"删除 {deleted} 条"]
 
 
 class BzScheduler:
@@ -417,10 +420,17 @@ class BzScheduler:
     async def _trigger_delete_chat(self) -> None:
         accounts = self._storage.accounts.list(enabled_only=True)
         agg = NotificationAggregator(get_notifier(), f"消息删拒 {datetime.datetime.now():%m-%d %H:%M}")
+        any_deleted = False
         for acc in accounts:
             task = DeleteChatTask(acc.account_id, self._storage)
             result = await self._run_and_record("消息删拒", acc, task)
-            agg.add_section(acc.name or acc.account_id, task.format_result(result))
-        await agg.flush()
+            lines = task.format_result(result)
+            if lines is not None:
+                any_deleted = True
+                agg.add_section(acc.name or acc.account_id, lines)
+        if any_deleted:
+            await agg.flush()
+        else:
+            log.info("[消息删拒] 全部账号无删除，跳过通知")
 
 
