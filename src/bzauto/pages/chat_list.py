@@ -325,7 +325,7 @@ JSON.stringify((function() {{
 
         必须先选中任意对话且输入框内有内容，否则按钮为 .disabled 状态无法点击。
         """
-        await self._session.click_element(_CHAT_SEND, post_sleep=1.0)
+        await self._session.click_element(_CHAT_SEND, post_sleep=4.0)
 
     async def send_message(self, text: str) -> None:
         """输入并发送消息。
