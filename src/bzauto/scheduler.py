@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import logging
 import re
+import sqlite3
 import traceback
 from typing import Any
 
@@ -21,11 +22,12 @@ from bzauto.flows.dispatch import DispatchFlow
 from bzauto.flows.scan import ChatScanFlow
 from bzauto.flows.scrape_chat import BossScrapeChatFlow
 from bzauto.flows.scrape_scheduled import BossScrapeScheduledFlow
+from bzauto.flows.urge import UrgeFlow
 from bzauto.notify import NotificationAggregator, get_notifier
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.models_doc import AccountDoc, RunDoc
-from bzauto.results import DispatchResult, ScrapeChatResult, ScrapeResult
+from bzauto.results import DispatchResult, ScrapeChatResult, ScrapeResult, UrgeResult
 from bzauto.storage import Storage
 from bzauto.task_runner import ScheduledTask, TaskRunner
 
@@ -145,6 +147,26 @@ class ScrapeChatTask(ScheduledTask):
         return lines
 
 
+class UrgeTask(ScheduledTask):
+    name = "催促"
+
+    def __init__(self, account_id: str, storage: Storage) -> None:
+        self._account_id = account_id
+        self._storage = storage
+
+    async def execute(self) -> UrgeResult:
+        bm = get_browser_manager()
+        session = bm.get_session(self._account_id)
+        page = BossChatListPage(session)
+        flow = UrgeFlow(page, session, self._account_id, self._storage)
+        return await flow.run()
+
+    def format_result(self, result: UrgeResult) -> list[str] | None:
+        if result.skipped or result.total == 0:
+            return None
+        return [f"催促 {result.total} 个 (成功 {result.success}, 失败 {result.failed})"]
+
+
 class DeleteChatTask(ScheduledTask):
     name = "消息删拒"
 
@@ -215,6 +237,18 @@ class BzScheduler:
             hours=1, **kwargs,
         )
 
+        nxt = self._load_next_run("urge")
+        kwargs = dict(
+            misfire_grace_time=_MISFIRE_GRACE,
+            coalesce=True,
+        )
+        if nxt is not None:
+            kwargs["next_run_time"] = nxt
+        self._scheduler.add_job(
+            self._trigger_urge, 'interval', id="urge",
+            minutes=30, **kwargs,
+        )
+
         self._scheduler.add_listener(
             self._on_job_event, EVENT_JOB_EXECUTED | EVENT_JOB_MISSED,
         )
@@ -238,6 +272,7 @@ class BzScheduler:
         "_trigger_scrape_chat": "消息扫描",
         "_trigger_delete_chat": "消息删拒",
         "_trigger_scrape": "采集",
+        "_trigger_urge": "催促",
     }
 
     def reset_all_jobs(self) -> None:
@@ -296,7 +331,10 @@ class BzScheduler:
 
     def _persist_next_run(self, job) -> None:
         if job and job.next_run_time:
-            self._storage.meta.set(f"next_run:{job.id}", job.next_run_time.isoformat())
+            try:
+                self._storage.meta.set(f"next_run:{job.id}", job.next_run_time.isoformat())
+            except sqlite3.OperationalError:
+                log.warning("持久化 next_run 失败 (DB 繁忙): %s", job.id)
 
     def _on_job_event(self, event) -> None:
         self._persist_next_run(self._scheduler.get_job(event.job_id))
@@ -416,6 +454,22 @@ class BzScheduler:
             await agg.flush()
         else:
             log.info("[消息扫描] 全部账号无未读消息，跳过通知")
+
+    async def _trigger_urge(self) -> None:
+        accounts = self._storage.accounts.list(enabled_only=True)
+        agg = NotificationAggregator(get_notifier(), f"催促 {datetime.datetime.now():%m-%d %H:%M}")
+        any_urged = False
+        for acc in accounts:
+            task = UrgeTask(acc.account_id, self._storage)
+            result = await self._run_and_record("催促", acc, task)
+            lines = task.format_result(result)
+            if lines is not None:
+                any_urged = True
+                agg.add_section(acc.name or acc.account_id, lines)
+        if any_urged:
+            await agg.flush()
+        else:
+            log.info("[催促] 全部账号无待催促，跳过通知")
 
     async def _trigger_delete_chat(self) -> None:
         accounts = self._storage.accounts.list(enabled_only=True)

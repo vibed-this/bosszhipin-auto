@@ -329,6 +329,22 @@ class ConversationRepo:
             (ConvStatus.CLOSED, now, now, conv_id, account),
         )
 
+    def list_unreplied(self, account: str = "") -> list[ConvDoc]:
+        """查找需催促的对话：我方最后发送且无平台状态且最后消息内容为空。
+
+        :param account: 过滤账号 ID，为空时不限账号
+        :returns: ConvDoc 列表
+        """
+        where = ["sender = 'self'", "(last_msg IS NULL OR last_msg = '')",
+                 "(platform_status IS NULL OR platform_status = '')"]
+        params: list[Any] = []
+        if account:
+            where.append("account = ?")
+            params.append(account)
+        sql = "SELECT * FROM conversations WHERE " + " AND ".join(where)
+        sql += " ORDER BY last_updated DESC"
+        return [ConvDoc(**r) for r in self.db.query(sql, params)]
+
     def delete(self, conv_id: str, account: str) -> None:
         self.tbl.delete((conv_id, account))
         log.info("删除对话: conv_id=%s account=%s", conv_id, account)
@@ -568,6 +584,7 @@ class Storage:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = Database(str(path))
         self.db.enable_wal()
+        self.db.conn.execute("PRAGMA busy_timeout=5000")
         self._init_schema()
 
         self.jobs = JobRepo(self.db)

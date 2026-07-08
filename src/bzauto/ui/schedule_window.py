@@ -16,11 +16,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-
-from bzauto.storage import Storage
-
 if TYPE_CHECKING:
     from bzauto.ui import BzAutoApp
+
 
 _ROLE_NEXT_RUN = Qt.ItemDataRole.UserRole + 10
 
@@ -31,7 +29,7 @@ class ScheduleWindow(QWidget):
     def __init__(self, app: BzAutoApp, parent=None):
         super().__init__(parent)
         self._app = app
-        self._storage = Storage()
+        self._storage = app._storage
 
         self.setWindowTitle("调度面板")
         self.setWindowFlags(Qt.WindowType.Window)

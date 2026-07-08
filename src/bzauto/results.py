@@ -33,3 +33,10 @@ class DispatchResult(BaseModel):
 class ScrapeResult(BaseModel):
     scraped: int = 0
     skipped: bool = False
+
+
+class UrgeResult(BaseModel):
+    success: int = 0
+    failed: int = 0
+    total: int = 0
+    skipped: bool = False

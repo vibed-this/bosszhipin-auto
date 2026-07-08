@@ -28,6 +28,7 @@ from bzauto.scheduler import (
     ScrapeChatTask,
     ScrapeManualTask,
     ScrapeTask,
+    UrgeTask,
 )
 from bzauto.ui.control_panel import ControlPanel
 from bzauto.ui.log_window import LogWindow
@@ -348,6 +349,7 @@ class BzAutoApp:
             "投递": DispatchTask(account_id, storage, get_config().schedule.dispatch_batch_size),
             "消息扫描": ScrapeChatTask(account_id, storage),
             "消息删拒": DeleteChatTask(account_id, storage),
+            "催促": UrgeTask(account_id, storage),
         }
         return mapping[task_name]
 
@@ -387,6 +389,7 @@ class BzAutoApp:
                 "投递": self._scheduler._trigger_dispatch,
                 "消息扫描": self._scheduler._trigger_scrape_chat,
                 "消息删拒": self._scheduler._trigger_delete_chat,
+                "催促": self._scheduler._trigger_urge,
             }
             await asyncio.wait_for(trigger_map[trigger_name](), timeout=timeout)
             elapsed = time.monotonic() - start
