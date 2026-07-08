@@ -9,6 +9,7 @@ from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
@@ -118,10 +119,14 @@ class DataWindow(QWidget):
         self._conv_account.currentTextChanged.connect(lambda: self._refresh_convs())
         self._btn_conv_refresh = QPushButton("刷新")
         self._btn_conv_refresh.clicked.connect(self._refresh_convs)
+        self._conv_hide_ended = QCheckBox("隐藏已结束")
+        self._conv_hide_ended.setChecked(True)
+        self._conv_hide_ended.stateChanged.connect(lambda: self._refresh_convs())
         toolbar.addWidget(self._conv_search)
         toolbar.addWidget(self._conv_status)
         toolbar.addWidget(self._conv_msg_type)
         toolbar.addWidget(self._conv_account)
+        toolbar.addWidget(self._conv_hide_ended)
         toolbar.addWidget(self._btn_conv_refresh)
         layout.addLayout(toolbar)
 
@@ -204,6 +209,8 @@ class DataWindow(QWidget):
         if account == "全部":
             account = ""
         convs = self._storage.conversations.list(keyword=keyword, status=status, account=account)
+        if self._conv_hide_ended.isChecked():
+            convs = [c for c in convs if c.status != "已结束"]
         msg_type_filter = self._conv_msg_type.currentText()
         if msg_type_filter != "全部":
             convs = [c for c in convs if classify_msg_type(c.last_msg, c.sender, c.platform_status).value == msg_type_filter]
