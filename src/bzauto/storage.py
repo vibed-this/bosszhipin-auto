@@ -433,6 +433,31 @@ class AccountRepo:
             (limit, account_id),
         )
 
+    def sync_from_config(self) -> None:
+        """从 config.toml 同步启用的账号到 SQLite accounts 表。
+        
+        新账号插入，已有账号更新 name/daily_limit/enabled/role，
+        不影响 daily_count/last_reset_date。
+        """
+        from bzauto.config import get_config
+        for a in get_config().accounts:
+            existing = self._get_or_none(self.tbl, a.id)
+            if existing is None:
+                self.tbl.insert({
+                    "account_id": a.id,
+                    "name": a.name,
+                    "daily_limit": a.daily_limit,
+                    "daily_count": 0,
+                    "last_reset_date": "",
+                    "enabled": 1 if a.enabled else 0,
+                    "role": a.role,
+                })
+            else:
+                self.db.conn.execute(
+                    "UPDATE accounts SET name=?, daily_limit=?, enabled=?, role=? WHERE account_id=?",
+                    (a.name, a.daily_limit, 1 if a.enabled else 0, a.role, a.id),
+                )
+
 
 class RunRepo:
     """schedule_runs 表仓库。"""
@@ -551,6 +576,8 @@ class Storage:
         self.runs = RunRepo(self.db)
         self.meta = MetaRepo(self.db)
         self.seen_hrefs = SeenHrefsRepo(self.db)
+
+        self.accounts.sync_from_config()
 
         log.info("数据库初始化: %s", path)
 
