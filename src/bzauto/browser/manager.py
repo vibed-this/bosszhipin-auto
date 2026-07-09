@@ -279,7 +279,7 @@ class BrowserManager(QMainWindow):
             return
         bar = self._tabs.tabBar()
         if count > 0:
-            bar.setTabText(idx, f"{atab.name} ({count})")
+            bar.setTabText(idx, f"📩 {atab.name} ({count})")
             bar.setTabTextColor(idx, QColor("#E67E22"))
         else:
             bar.setTabText(idx, atab.name)
