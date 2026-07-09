@@ -40,4 +40,5 @@ class UrgeResult(BaseModel):
     success: int = 0
     failed: int = 0
     total: int = 0
+    skipped_stopped: int = 0
     skipped: bool = False

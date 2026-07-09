@@ -361,6 +361,25 @@ class ConversationRepo:
         sql += " ORDER BY last_updated DESC"
         return [ConvDoc(**r) for r in self.db.query(sql, params)]
 
+    def list_urge_delivered(self, account: str = "") -> list[ConvDoc]:
+        """查找需二次催促的对话：我方「您好」招呼已送达但未读。
+
+        :param account: 过滤账号 ID，为空时不限账号
+        :returns: ConvDoc 列表
+        """
+        where = [
+            "sender = 'self'",
+            "platform_status = '送达'",
+            "last_msg LIKE '您好%'",
+        ]
+        params: list[Any] = []
+        if account:
+            where.append("account = ?")
+            params.append(account)
+        sql = "SELECT * FROM conversations WHERE " + " AND ".join(where)
+        sql += " ORDER BY last_updated DESC"
+        return [ConvDoc(**r) for r in self.db.query(sql, params)]
+
     def delete(self, conv_id: str, account: str) -> None:
         self.tbl.delete((conv_id, account))
         log.info("删除对话: conv_id=%s account=%s", conv_id, account)

@@ -13,7 +13,8 @@ from bzauto.pages.base import BasePage
 
 log = logging.getLogger("page.chat_list")
 
-_CHAT_URL = "https://www.zhipin.com/web/geek/chat"
+CHAT_URL = "https://www.zhipin.com/web/geek/chat"
+_CHAT_URL = CHAT_URL
 
 _LABEL_LIST = ".label-list li .label-name"
 _FOOTER = ".boss-list-footer .finished"
@@ -149,6 +150,16 @@ class BossChatListPage(BasePage):
     def __init__(self, session: BrowserSession) -> None:
         super().__init__(session)
         self._session: BrowserSession = session
+
+    async def wait_chat_list_ready(self, timeout: float = 15.0) -> bool:
+        """等待 Vue dataSources 就绪（页面跳转回聊天页后调用）。"""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            items = await self.get_chat_items(limit=1)
+            if items:
+                return True
+            await asyncio.sleep(0.5)
+        return False
 
     async def get_chat_items(
         self,

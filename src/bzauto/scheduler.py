@@ -168,7 +168,10 @@ class UrgeTask(ScheduledTask):
     def format_result(self, result: UrgeResult) -> list[str] | None:
         if result.skipped or result.total == 0:
             return None
-        return [f"催促 {result.total} 个 (成功 {result.success}, 失败 {result.failed})"]
+        parts = [f"成功 {result.success}", f"失败 {result.failed}"]
+        if result.skipped_stopped:
+            parts.append(f"停招 {result.skipped_stopped}")
+        return [f"催促 {result.total} 个 ({', '.join(parts)})"]
 
 
 class DeleteChatTask(ScheduledTask):

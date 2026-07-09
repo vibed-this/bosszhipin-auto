@@ -62,6 +62,11 @@ class BossJobDetailPage(BasePage):
             return banners[0].get("text", "").strip()
         return ""
 
+    async def is_still_recruiting(self) -> bool:
+        """职位是否仍在招聘（status 文本不包含「停止」）。"""
+        status = await self.get_job_status()
+        return "停止" not in status
+
     async def get_job_desc(self) -> str:
         """提取职位描述正文（排除公司介绍区块）。"""
         return await self._get_section_text(self._JOB_DESC)
