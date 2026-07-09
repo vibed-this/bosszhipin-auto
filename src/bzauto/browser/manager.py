@@ -352,6 +352,15 @@ def get_browser_manager() -> BrowserManager | None:
     return _manager
 
 
-def _set_browser_manager(m: BrowserManager) -> None:
+def _set_browser_manager(m: BrowserManager | None) -> None:
     global _manager
     _manager = m
+
+
+async def shutdown_browser_manager(*, wait_ms: int = 800) -> None:
+    """关闭浏览器窗口并清空单例，避免重复启动时 profile 冲突导致登出。"""
+    global _manager
+    if _manager is not None:
+        _manager.close()
+        _manager = None
+        await asyncio.sleep(wait_ms / 1000)

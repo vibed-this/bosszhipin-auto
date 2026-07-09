@@ -8,7 +8,7 @@ import re
 from typing import Any
 import logging
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, computed_field
 
 from bzauto.enums import ConvStatus, MsgType
 from bzauto.models_doc import ConvDoc, JobDoc
@@ -123,6 +123,21 @@ def parse_chat_time(time_text: str) -> str:
     return t
 
 
+def clean_boss_detail_text(text: str) -> str:
+    """清洗 Boss 详情页反爬混淆文本（如插入的 kanzhun / 直聘 噪声）。"""
+    if not text:
+        return ""
+    cleaned = text.replace("kanzhun", "")
+    # 正文中插入的 BOSS直聘 / 直聘 / boss（非句首品牌名）
+    cleaned = re.sub(r"^直聘(?=[\u4e00-\u9fff])", "", cleaned)
+    cleaned = re.sub(r"(?<=[\u4e00-\u9fff])BOSS直聘(?=[\u4e00-\u9fff])", "", cleaned)
+    cleaned = re.sub(r"(?<=[\u4e00-\u9fff])直聘(?=[\u4e00-\u9fff])", "", cleaned)
+    cleaned = re.sub(r"(?<=[\u4e00-\u9fff])boss(?=[\u4e00-\u9fff])", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 class JobCard(BaseModel):
     model_config = ConfigDict(frozen=True)
     """职位卡片数据。
@@ -203,13 +218,127 @@ class JobCard(BaseModel):
         )
 
 
+class JobDetailMeta(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    """职位详情页 banner 区元数据（服务端渲染 DOM）。"""
+
+    title: str = ""
+    salary: str = ""
+    location: str = ""
+    experience: str = ""
+    degree: str = ""
+    tags: list[str] = []
+
+
+class ChatMessage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    """单条聊天消息（来自已载入的 .message-item DOM）。"""
+
+    mid: int = 0
+    time: int = 0
+    formateTime: str = ""
+    isSelf: bool = False
+    type: int = 0
+    bodyType: int = 0
+    fromName: str = ""
+    text: str = ""
+    status: int = 0
+    messageType: str = ""
+    securityId: str = ""
+    uniqueId: str = ""
+    friendId: int = 0
+    friendSource: int = 0
+
+    @classmethod
+    def from_vue_message(cls, row: dict[str, Any]) -> ChatMessage:
+        text = row.get("text") or ""
+        return cls(
+            mid=row.get("mid") or 0,
+            time=row.get("time") or 0,
+            formateTime=row.get("formateTime") or "",
+            isSelf=bool(row.get("isSelf")),
+            type=row.get("type") or 0,
+            bodyType=row.get("bodyType") or 0,
+            fromName=row.get("fromName") or "",
+            text=text,
+            status=row.get("status") or 0,
+            messageType=str(row.get("messageType") or ""),
+            securityId=row.get("securityId") or "",
+            uniqueId=row.get("uniqueId") or "",
+            friendId=row.get("friendId") or 0,
+            friendSource=row.get("friendSource") or 0,
+        )
+
+
+class ConversationBoss(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    """当前选中会话的 Boss/职位详情（来自 message-list.$data.boss）。"""
+
+    name: str = ""
+    company: str = ""
+    hrTitle: str = ""
+    jobName: str = ""
+    positionName: str = ""
+    locationName: str = ""
+    jobTypeDesc: str = ""
+    avatar: str = ""
+    encryptBossId: str = ""
+    encryptJobId: str = ""
+    securityId: str = ""
+    jobId: int = 0
+    uniqueId: str = ""
+    uid: int = 0
+    friendId: int = 0
+    friendSource: int = 0
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def job_href(self) -> str:
+        if self.encryptJobId:
+            return f"https://www.zhipin.com/job_detail/{self.encryptJobId}.html"
+        return ""
+
+    @classmethod
+    def from_vue_boss(cls, row: dict[str, Any]) -> ConversationBoss:
+        return cls(
+            name=row.get("name") or "",
+            company=row.get("brandName") or "",
+            hrTitle=row.get("title") or "",
+            jobName=row.get("jobName") or "",
+            positionName=row.get("positionName") or "",
+            locationName=row.get("locationName") or "",
+            jobTypeDesc=row.get("jobTypeDesc") or "",
+            avatar=row.get("avatar") or "",
+            encryptBossId=row.get("encryptBossId") or "",
+            encryptJobId=row.get("encryptJobId") or "",
+            securityId=row.get("securityId") or "",
+            jobId=row.get("jobId") or 0,
+            uniqueId=row.get("uniqueId") or "",
+            uid=row.get("uid") or 0,
+            friendId=row.get("friendId") or 0,
+            friendSource=row.get("friendSource") or 0,
+        )
+
+
+class ConversationMeta(BaseModel):
+    model_config = ConfigDict(frozen=True)
+    """当前会话 message-list 分页/加载状态。"""
+
+    page: int = 0
+    pageSize: int = 0
+    msgMinId: int = 0
+    history: bool = False
+    isToTop: bool = False
+    loading: bool = False
+
+
 class ChatItem(BaseModel):
     model_config = ConfigDict(frozen=True)
     """聊天列表项数据。
 
     :ivar name: 招聘者姓名
     :ivar company: 公司名称
-    :ivar position: 招聘职位
+    :ivar position: HR 头衔（Vue title 字段，兼容旧语义）
     :ivar time: 最后消息时间文本（DOM 来源）或时间戳字符串（Vue 来源）
     :ivar lastMsg: 最后一条消息文本
     :ivar status: BOSS 平台状态文本（如 "已读"）
@@ -217,6 +346,9 @@ class ChatItem(BaseModel):
     :ivar unread_count: 未读消息数（0=已读, >0=对方未读条数, -1=未知）
     :ivar uniqueId: Vue 侧唯一标识（{uid}-{friendSource}）
     :ivar jobId: Boss 直聘职位数字 ID
+    :ivar encryptJobId: 加密职位 ID，可拼职位详情 URL
+    :ivar encryptBossId: 加密 Boss ID
+    :ivar securityId: 会话 securityId
     """
 
     name: str
@@ -229,6 +361,25 @@ class ChatItem(BaseModel):
     unread_count: int = 0   # 0=已读, >0=对方未读条数, -1=未知
     uniqueId: str = ""
     jobId: int = 0
+    encryptJobId: str = ""
+    encryptBossId: str = ""
+    securityId: str = ""
+    lastMsgId: int = 0
+    uid: int = 0
+    friendId: int = 0
+    friendSource: int = 0
+    avatar: str = ""
+    relationType: int = 0
+    sourceTitle: str = ""
+    isTop: int = 0
+    note: str = ""
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def job_href(self) -> str:
+        if self.encryptJobId:
+            return f"https://www.zhipin.com/job_detail/{self.encryptJobId}.html"
+        return ""
 
     @classmethod
     def from_query_row(cls, row: dict[str, Any]) -> ChatItem:
@@ -306,6 +457,18 @@ class ChatItem(BaseModel):
             unread_count=unread,
             uniqueId=unique_id,
             jobId=job_id,
+            encryptJobId=row.get("encryptJobId") or "",
+            encryptBossId=row.get("encryptBossId") or "",
+            securityId=row.get("securityId") or "",
+            lastMsgId=row.get("lastMsgId") or 0,
+            uid=row.get("uid") or 0,
+            friendId=row.get("friendId") or 0,
+            friendSource=row.get("friendSource") or 0,
+            avatar=row.get("avatar") or "",
+            relationType=row.get("relationType") or 0,
+            sourceTitle=row.get("sourceTitle") or "",
+            isTop=row.get("isTop") or 0,
+            note=row.get("note") or "",
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -320,6 +483,7 @@ class ChatItem(BaseModel):
         """
         conv_id = make_conv_id(account_id, self.name, self.company)
         parsed_time = parse_chat_time(self.time)
+        linked_job_id = make_job_id(self.job_href) if self.job_href else None
         return ConvDoc(
             conv_id=conv_id,
             account=account_id,
@@ -332,6 +496,9 @@ class ChatItem(BaseModel):
             sender=self.sender,
             unread_count=self.unread_count,
             unique_id=self.uniqueId,
+            encrypt_boss_id=self.encryptBossId,
+            encrypt_job_id=self.encryptJobId,
+            linked_job_id=linked_job_id,
         )
 
 

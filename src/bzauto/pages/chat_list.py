@@ -8,7 +8,7 @@ import time
 from typing import AsyncIterator
 
 from bzauto.browser.session import BrowserSession, ElementNotFound
-from bzauto.models import ChatItem
+from bzauto.models import ChatItem, ChatMessage, ConversationBoss, ConversationMeta
 from bzauto.pages.base import BasePage
 
 log = logging.getLogger("page.chat_list")
@@ -30,6 +30,115 @@ _DIALOG_CONFIRM = ".boss-dialog__button:not(.button-outline)"
 _CHAT_NO_DATA_CONTAINER = ".chat-conversation .chat-no-data"
 _CHAT_INPUT = "div.chat-input"
 _CHAT_SEND = "button.btn-v2.btn-sure-v2.btn-send"
+_CHAT_RECORD = ".chat-record"
+_MESSAGE_ITEM = ".message-item"
+
+# Vue dataSources 字段映射（列表侧）
+_VUE_MAP_SOURCE_JS = """
+function mapSource(s) {
+    return {
+        name: s.name,
+        avatar: s.avatar || '',
+        brandName: s.brandName,
+        title: s.title,
+        encryptBossId: s.encryptBossId || '',
+        securityId: s.securityId || '',
+        encryptJobId: s.encryptJobId || '',
+        jobId: s.jobId || 0,
+        friendSource: s.friendSource || 0,
+        friendId: s.friendId || 0,
+        uid: s.uid || 0,
+        uniqueId: s.uniqueId || '',
+        relationType: s.relationType || 0,
+        sourceTitle: s.sourceTitle || '',
+        lastText: s.lastText || '',
+        lastMsgId: s.lastMsgId || 0,
+        lastMsgStatus: s.lastMsgStatus,
+        lastTS: s.lastTS,
+        updateTime: s.updateTime,
+        unreadCount: s.unreadCount,
+        lastIsSelf: s.lastIsSelf,
+        isTop: s.isTop || 0,
+        note: s.note || '',
+    };
+}
+"""
+
+_VUE_EXTRACT_DATASOURCES_JS = f"""
+JSON.stringify((function() {{
+    {_VUE_MAP_SOURCE_JS}
+    var el = document.querySelector('.user-list-content');
+    if (!el || !el.__vue__) return [];
+    var ds = el.__vue__.$props && el.__vue__.$props.dataSources;
+    if (!Array.isArray(ds)) return [];
+    return ds.map(mapSource);
+}})())
+"""
+
+_VUE_EXTRACT_BOSS_JS = f"""
+JSON.stringify((function() {{
+    {_VUE_MAP_SOURCE_JS}
+    function mapBoss(s) {{
+        var base = mapSource(s);
+        base.jobName = s.jobName || '';
+        base.positionName = s.positionName || '';
+        base.locationName = s.locationName || '';
+        base.jobTypeDesc = s.jobTypeDesc || '';
+        return base;
+    }}
+    var el = document.querySelector('{_CHAT_RECORD}');
+    if (!el || !el.__vue__) return null;
+    var boss = el.__vue__.$data && el.__vue__.$data.boss;
+    if (!boss) return null;
+    return mapBoss(boss);
+}})())
+"""
+
+_VUE_EXTRACT_CONV_META_JS = f"""
+JSON.stringify((function() {{
+    var el = document.querySelector('{_CHAT_RECORD}');
+    if (!el || !el.__vue__) return null;
+    var d = el.__vue__.$data;
+    if (!d) return null;
+    return {{
+        page: d.page || 0,
+        pageSize: d.pageSize || 0,
+        msgMinId: d.msgMinId || 0,
+        history: !!d.history,
+        isToTop: !!d.isToTop,
+        loading: !!d.loading,
+    }};
+}})())
+"""
+
+_VUE_EXTRACT_LOADED_MESSAGES_JS = f"""
+JSON.stringify((function() {{
+    var items = document.querySelectorAll('{_MESSAGE_ITEM}');
+    var out = [];
+    items.forEach(function(el) {{
+        var m = el.__vue__ && el.__vue__.$props && el.__vue__.$props.message;
+        if (!m) return;
+        var text = m.text || m.body || (m.extend && m.extend.text) || '';
+        out.push({{
+            mid: m.mid || 0,
+            time: m.time || 0,
+            formateTime: m.formateTime || '',
+            isSelf: !!m.isSelf,
+            type: m.type || 0,
+            bodyType: m.bodyType || 0,
+            fromName: m.fromName || '',
+            text: text,
+            status: m.status || 0,
+            messageType: m.messageType || 0,
+            securityId: m.securityId || '',
+            uniqueId: m.uniqueId || '',
+            friendId: m.friendId || 0,
+            friendSource: m.friendSource || 0,
+        }});
+    }});
+    return out;
+}})())
+"""
 
 
 class BossChatListPage(BasePage):
@@ -53,28 +162,7 @@ class BossChatListPage(BasePage):
         :param include_status: 已弃用，保留兼容
         :returns: ChatItem 列表
         """
-        raw = await self._session.eval_js("""
-JSON.stringify((function() {
-    var el = document.querySelector('.user-list-content');
-    if (!el || !el.__vue__) return [];
-    var ds = el.__vue__.$props && el.__vue__.$props.dataSources;
-    if (!Array.isArray(ds)) return [];
-    return ds.map(function(s) {
-        return {
-            name: s.name,
-            brandName: s.brandName,
-            title: s.title,
-            lastText: s.lastText,
-            lastTS: s.lastTS,
-            lastMsgStatus: s.lastMsgStatus,
-            unreadCount: s.unreadCount,
-            lastIsSelf: s.lastIsSelf,
-            uniqueId: s.uniqueId,
-            jobId: s.jobId,
-        };
-    });
-})())
-        """)
+        raw = await self._session.eval_js(_VUE_EXTRACT_DATASOURCES_JS)
         if not raw:
             return []
         items = json.loads(raw) if isinstance(raw, str) else raw
@@ -91,63 +179,51 @@ JSON.stringify((function() {
         scroll_timeout: float = 30.0,
     ) -> AsyncIterator[ChatItem]:
         """JS 先滚动到底部（按高度无变化算），再一次性 dump 所有数据。"""
-        await self._session.eval_js("""
-(function() {
+        await self._session.eval_js(f"""
+(function() {{
     window.__bz_chat_data = null;
     window.__bz_chat_scroll_done = false;
+    {_VUE_MAP_SOURCE_JS}
 
     var container = document.querySelector('.user-list-content');
-    if (!container) {
+    if (!container) {{
         window.__bz_chat_scroll_done = true;
         return;
-    }
+    }}
 
     var lastHeight = -1;
     var maxAttempts = 40;
     var attempt = 0;
 
-    function doScroll() {
-        if (attempt >= maxAttempts) {
+    function doScroll() {{
+        if (attempt >= maxAttempts) {{
             finish();
             return;
-        }
+        }}
         attempt++;
         container.scrollTop = container.scrollHeight;
         var currentHeight = container.scrollHeight;
-        if (currentHeight === lastHeight) {
+        if (currentHeight === lastHeight) {{
             finish();
-        } else {
+        }} else {{
             lastHeight = currentHeight;
             setTimeout(doScroll, 800);
-        }
-    }
+        }}
+    }}
 
-    function finish() {
+    function finish() {{
         var el = document.querySelector('.user-list-content');
-        if (el && el.__vue__) {
+        if (el && el.__vue__) {{
             var ds = el.__vue__.$props && el.__vue__.$props.dataSources;
-            if (Array.isArray(ds)) {
-                window.__bz_chat_data = ds.map(function(s) {
-                    return {
-                        name: s.name,
-                        brandName: s.brandName,
-                        title: s.title,
-                        lastText: s.lastText,
-                        lastTS: s.lastTS,
-                        lastMsgStatus: s.lastMsgStatus,
-                        unreadCount: s.unreadCount,
-                        lastIsSelf: s.lastIsSelf,
-                        uniqueId: s.uniqueId,
-                        jobId: s.jobId,
-                    };
-                });
-            }
-        }
+            if (Array.isArray(ds)) {{
+                window.__bz_chat_data = ds.map(mapSource);
+            }}
+        }}
         window.__bz_chat_scroll_done = true;
-    }
+    }}
 
     doScroll();
-})()
+}})()
         """)
 
         deadline = time.monotonic() + scroll_timeout
@@ -167,6 +243,43 @@ JSON.stringify((function() {
             if uid and uid not in seen:
                 seen.add(uid)
                 yield ChatItem.from_vue_row(item)
+
+    async def get_conversation_boss(self) -> ConversationBoss | None:
+        """读取当前选中会话的 Boss/职位详情（message-list.$data.boss）。
+
+        须先 click_chat_item 选中对话。
+        """
+        raw = await self._session.eval_js(_VUE_EXTRACT_BOSS_JS)
+        if not raw:
+            return None
+        row = json.loads(raw) if isinstance(raw, str) else raw
+        if not row:
+            return None
+        return ConversationBoss.from_vue_boss(row)
+
+    async def get_conversation_meta(self) -> ConversationMeta | None:
+        """读取当前会话 message-list 分页/加载状态。
+
+        须先 click_chat_item 选中对话。
+        """
+        raw = await self._session.eval_js(_VUE_EXTRACT_CONV_META_JS)
+        if not raw:
+            return None
+        row = json.loads(raw) if isinstance(raw, str) else raw
+        if not row:
+            return None
+        return ConversationMeta(**row)
+
+    async def get_loaded_messages(self) -> list[ChatMessage]:
+        """读取当前会话已载入 DOM 的聊天消息（不滚动加载历史）。
+
+        须先 click_chat_item 选中对话。
+        """
+        raw = await self._session.eval_js(_VUE_EXTRACT_LOADED_MESSAGES_JS)
+        if not raw:
+            return []
+        rows = json.loads(raw) if isinstance(raw, str) else raw
+        return [ChatMessage.from_vue_message(row) for row in (rows or [])]
 
     async def is_chat_page(self) -> bool:
         url = self._session.current_url
