@@ -230,7 +230,8 @@ class BrowserManager(QMainWindow):
         self._splitter.setSizes([self.width() - default_width, default_width])
 
     def _on_tab_changed(self, index: int) -> None:
-        log.debug("标签页切换到 index=%d", index)
+        pass
+        # log.debug("标签页切换到 index=%d", index)
 
     def add_account(self, acc: dict[str, Any]) -> None:
         """运行时新增账号 tab+profile。acc 需包含 id 和 name。"""
