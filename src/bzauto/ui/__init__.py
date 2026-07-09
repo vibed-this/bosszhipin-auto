@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 import traceback
+from typing import TYPE_CHECKING, Any
 
 import keyboard
 import qasync
@@ -37,6 +38,10 @@ from bzauto.ui.config_dialog import ConfigDialog
 from bzauto.ui.data_window import DataWindow
 from bzauto.ui.schedule_window import ScheduleWindow
 from bzauto.ui.status_panel import SideStatusPanel
+
+if TYPE_CHECKING:
+    from bzauto.ui.account_window import AccountWindow
+    from bzauto.ui.debug_window import DebugWindow
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -98,7 +103,7 @@ class BzAutoApp:
         self._task_runner: TaskRunner | None = None
         self._scheduler: BzScheduler | None = None
         self._unread_watcher: UnreadWatcher | None = None
-        self._current_task: asyncio.Task | None = None
+        self._current_task: asyncio.Task[Any] | None = None
         self._config_dlg: ConfigDialog | None = None
 
         self._setup_ui()
@@ -116,7 +121,9 @@ class BzAutoApp:
 
         # 全局快捷键 — 通过 run_coroutine_threadsafe 投递到 qasync 循环
         keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
-        def _stop_threadsafe():
+        def _stop_threadsafe() -> None:
+            if self._loop is None:
+                return
             f = asyncio.run_coroutine_threadsafe(self._async_stop(), self._loop)
             try:
                 f.result(timeout=5)
@@ -225,6 +232,9 @@ class BzAutoApp:
         if self._scheduler is not None and self._scheduler.running:
             log.info("调度器已在运行")
             return
+        if self._task_runner is None or self._loop is None:
+            log.warning("系统尚未初始化完成，无法启动调度器")
+            return
         log.info("启动调度器")
         self._scheduler = BzScheduler(self._task_runner, self._loop, self._storage)
         self._scheduler.start()
@@ -258,7 +268,7 @@ class BzAutoApp:
         self._current_task = t
         t.add_done_callback(self._on_task_done)
 
-    async def _run_and_notify(self, task: ScheduledTask) -> dict:
+    async def _run_and_notify(self, task: ScheduledTask) -> dict[str, Any]:
         """执行 ScheduledTask 并通过 TaskRunner 排队，完成后通知。"""
         try:
             while self._task_runner is None:
@@ -276,13 +286,14 @@ class BzAutoApp:
             log.error("任务异常 (%s):\n%s", task.name, traceback.format_exc())
             raise
 
-    def _on_task_done(self, future: asyncio.Future) -> None:
+    def _on_task_done(self, future: asyncio.Future[Any]) -> None:
         if future.cancelled():
             log.info("任务已取消")
-        elif future.exception():
+        else:
             exc = future.exception()
-            tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-            log.error("任务失败:\n%s", tb)
+            if exc is not None:
+                tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+                log.error("任务失败:\n%s", tb)
         self._bridge.buttons_enabled.emit(True)
         self._bridge.debug_running.emit(False)
         self._status_panel.refresh()
@@ -409,7 +420,7 @@ class BzAutoApp:
         except Exception:
             self._bridge.debug_error.emit(trigger_name, traceback.format_exc())
 
-    def _on_debug_done(self, future: asyncio.Future) -> None:
+    def _on_debug_done(self, future: asyncio.Future[Any]) -> None:
         self._bridge.debug_running.emit(False)
         self._bridge.buttons_enabled.emit(True)
         # 自动刷新 debug 状态
@@ -427,6 +438,7 @@ class BzAutoApp:
 
     async def _init_async(self) -> None:
         """qasync 循环启动后回调：初始化 TaskRunner、Scheduler。"""
+        assert self._loop is not None
         self._task_runner = TaskRunner(self._loop)
         self._scheduler = BzScheduler(self._task_runner, self._loop, self._storage)
 
