@@ -19,8 +19,8 @@ from bzauto.browser import BrowserManager, get_browser_manager
 from bzauto.browser.manager import _set_browser_manager
 from bzauto.config import get_config
 from bzauto.notify import get_notifier
-from bzauto.pages import BossHeader
 from bzauto.storage import Storage
+from bzauto.unread_watcher import UnreadWatcher
 from bzauto.task_runner import ScheduledTask, TaskRunner
 from bzauto.scheduler import (
     BzScheduler,
@@ -95,6 +95,7 @@ class BzAutoApp:
         # 任务状态
         self._task_runner: TaskRunner | None = None
         self._scheduler: BzScheduler | None = None
+        self._unread_watcher: UnreadWatcher | None = None
         self._current_task: asyncio.Task | None = None
         self._config_dlg: ConfigDialog | None = None
 
@@ -410,6 +411,13 @@ class BzAutoApp:
         if self._debug_win is not None and self._debug_win.isVisible():
             self._debug_win._refresh_status()
 
+    async def _on_unread_detected(self, account_id: str) -> None:
+        """未读上升时触发单账号扫描（调度器停止时不触发）。"""
+        if self._scheduler is None or not self._scheduler.running:
+            log.debug("调度器未运行，跳过未读触发 [%s]", account_id)
+            return
+        await self._scheduler.trigger_scrape_chat_account(account_id)
+
     # ── 异步初始化 ──
 
     async def _init_async(self) -> None:
@@ -423,29 +431,17 @@ class BzAutoApp:
         self._storage.runs.purge_old(30)
         self._scheduler.start()
 
-        # 每 5 秒轮询所有账号消息未读数
-        for acc in self._cfg.accounts:
-            if acc.enabled:
-                self._loop.create_task(self._poll_unread(acc.id))
+        enabled_ids = [acc.id for acc in self._cfg.accounts if acc.enabled]
+        self._unread_watcher = UnreadWatcher(
+            account_ids=enabled_ids,
+            task_runner=self._task_runner,
+            on_badge_update=self._manager.update_tab_badge,
+            on_unread_detected=self._on_unread_detected,
+            loop=self._loop,
+        )
+        self._unread_watcher.start()
 
         log.info("系统启动完成: 调度器已运行")
-
-    async def _poll_unread(self, account_id: str) -> None:
-        """每 5 秒检查账号未读消息，更新 tab 角标。"""
-        session = self._manager.get_session(account_id)
-        if session is None:
-            log.warning("轮询未读: 账号 %s 无 session", account_id)
-            return
-        header = BossHeader(session)
-        while True:
-            try:
-                count = await header.get_unread_count()
-                self._manager.update_tab_badge(account_id, count)
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                log.debug("轮询未读 [%s] 失败: %s", account_id, e)
-            await asyncio.sleep(5)
 
     def run(self) -> None:
         """启动应用（阻塞直至退出）。"""

@@ -98,11 +98,21 @@ class ConfigDialog(QDialog):
         self._spin_scan_interval = QSpinBox()
         self._spin_scan_interval.setRange(1, 1440)
         self._spin_scan_interval.setSuffix(" 分钟")
+        self._check_unread_trigger = QCheckBox("未读角标上升时自动扫描")
+        self._spin_unread_poll = QSpinBox()
+        self._spin_unread_poll.setRange(1, 300)
+        self._spin_unread_poll.setSuffix(" 秒")
+        self._spin_unread_cooldown = QSpinBox()
+        self._spin_unread_cooldown.setRange(1, 120)
+        self._spin_unread_cooldown.setSuffix(" 分钟")
         self._edit_delete_chat_time = QLineEdit()
         self._edit_delete_chat_time.setPlaceholderText("03:00")
         layout.addRow("投递时间", self._edit_dispatch_times)
         layout.addRow("批量大小", self._spin_batch_size)
         layout.addRow("消息扫描间隔", self._spin_scan_interval)
+        layout.addRow("", self._check_unread_trigger)
+        layout.addRow("未读轮询间隔", self._spin_unread_poll)
+        layout.addRow("未读触发冷却", self._spin_unread_cooldown)
         layout.addRow("消息删拒时间", self._edit_delete_chat_time)
 
     def _build_notify_tab(self):
@@ -148,6 +158,9 @@ class ConfigDialog(QDialog):
         self._edit_dispatch_times.setText(", ".join(cfg.schedule.dispatch_times))
         self._spin_batch_size.setValue(cfg.schedule.dispatch_batch_size)
         self._spin_scan_interval.setValue(cfg.schedule.scan_interval_minutes)
+        self._check_unread_trigger.setChecked(cfg.schedule.unread_trigger_enabled)
+        self._spin_unread_poll.setValue(cfg.schedule.unread_poll_seconds)
+        self._spin_unread_cooldown.setValue(cfg.schedule.unread_scan_cooldown_minutes)
         self._edit_delete_chat_time.setText(cfg.schedule.delete_chat_time)
         self._check_enabled.setChecked(cfg.notification.enabled)
         self._check_merge.setChecked(cfg.notification.merge)
@@ -170,6 +183,9 @@ class ConfigDialog(QDialog):
             cfg.schedule.dispatch_times = times
         cfg.schedule.dispatch_batch_size = self._spin_batch_size.value()
         cfg.schedule.scan_interval_minutes = self._spin_scan_interval.value()
+        cfg.schedule.unread_trigger_enabled = self._check_unread_trigger.isChecked()
+        cfg.schedule.unread_poll_seconds = self._spin_unread_poll.value()
+        cfg.schedule.unread_scan_cooldown_minutes = self._spin_unread_cooldown.value()
         t = self._edit_delete_chat_time.text().strip()
         if t:
             cfg.schedule.delete_chat_time = t

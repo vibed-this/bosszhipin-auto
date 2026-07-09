@@ -81,6 +81,9 @@ class ScheduleConfig(BaseModel):
     :ivar dispatch_total_limit: 单次调度的总沟通上限（跨账号累计）
     :ivar scrape_threshold: 投递前触发采集的 pending 数量下限
     :ivar scan_interval_minutes: 消息扫描间隔（分钟）
+    :ivar unread_trigger_enabled: 未读角标上升时自动触发单账号消息扫描
+    :ivar unread_poll_seconds: 未读角标轮询间隔（秒）
+    :ivar unread_scan_cooldown_minutes: 单账号未读触发扫描冷却（分钟）
     :ivar delete_chat_time: 消息删拒每天执行时间 (HH:MM)
     :ivar claim_timeout_minutes: claim 超时释放（分钟）
     """
@@ -93,6 +96,9 @@ class ScheduleConfig(BaseModel):
     dispatch_total_limit: int = 200
     scrape_threshold: int = 50
     scan_interval_minutes: int = 15
+    unread_trigger_enabled: bool = True
+    unread_poll_seconds: int = 5
+    unread_scan_cooldown_minutes: int = 3
     delete_chat_time: str = "20:00"
     claim_timeout_minutes: int = 30
 
@@ -202,6 +208,9 @@ dispatch_batch_size = 20
 dispatch_total_limit = 200
 scrape_threshold = 50
 scan_interval_minutes = 15
+unread_trigger_enabled = true
+unread_poll_seconds = 5
+unread_scan_cooldown_minutes = 3
 delete_chat_time = "03:00"
 claim_timeout_minutes = 30
 

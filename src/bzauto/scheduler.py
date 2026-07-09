@@ -437,14 +437,36 @@ class BzScheduler:
             agg.add_section(acc.name or acc.account_id, task.format_result(result))
         await agg.flush()
 
+    async def _scrape_chat_account(
+        self, account_id: str, trigger: str,
+    ) -> tuple[AccountDoc | None, list[str] | None]:
+        acc = self._storage.accounts.get(account_id)
+        if acc is None or not acc.enabled:
+            return None, None
+        task = ScrapeChatTask(account_id, self._storage)
+        result = await self._run_and_record(trigger, acc, task)
+        return acc, task.format_result(result)
+
+    async def trigger_scrape_chat_account(self, account_id: str) -> None:
+        """未读触发：仅扫描指定账号的消息列表。"""
+        acc, lines = await self._scrape_chat_account(account_id, "未读触发")
+        if acc is None:
+            log.warning("[未读触发] 账号不存在或未启用: %s", account_id)
+            return
+        if lines is not None:
+            await get_notifier().send(
+                f"未读触发消息扫描 {datetime.datetime.now():%m-%d %H:%M}",
+                "\n".join([acc.name or acc.account_id] + lines),
+            )
+        else:
+            log.info("[未读触发] %s 无未读消息", acc.name or acc.account_id)
+
     async def _trigger_scrape_chat(self) -> None:
         accounts = self._storage.accounts.list(enabled_only=True)
         agg = NotificationAggregator(get_notifier(), f"消息扫描 {datetime.datetime.now():%m-%d %H:%M}")
         any_unread = False
         for acc in accounts:
-            task = ScrapeChatTask(acc.account_id, self._storage)
-            result = await self._run_and_record("消息扫描", acc, task)
-            lines = task.format_result(result)
+            _, lines = await self._scrape_chat_account(acc.account_id, "消息扫描")
             if lines is not None:
                 any_unread = True
                 agg.add_section(acc.name or acc.account_id, lines)
