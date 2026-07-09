@@ -123,6 +123,22 @@ class JobRepo:
         )
         log.debug("job 失败: %s", job_id)
 
+    def mark_filtered(
+        self,
+        job_id: str,
+        *,
+        note: str = "",
+        job_desc: str = "",
+    ) -> None:
+        """标记为黑名单过滤（不再重试投递）。"""
+        now = _now_iso()
+        self.db.conn.execute(
+            "UPDATE jobs SET dispatch_status=?, note=?, job_desc=?, last_updated=? "
+            "WHERE job_id=?",
+            (DispatchStatus.FILTERED, note, job_desc, now, job_id),
+        )
+        log.info("job 黑名单过滤: %s note=%s", job_id, note)
+
     def release_stale_claims(self, timeout_minutes: int = 30) -> int:
         now = _now_iso()
         cursor = self.db.conn.execute(

@@ -7,8 +7,10 @@ import random
 
 from bzauto.browser.session import BrowserSession
 from bzauto.config import get_config
+from bzauto.filter import match_blacklist
 from bzauto.flows.base import BaseFlow
 from bzauto.pages.chat_list import BossChatListPage
+from bzauto.pages.job_detail import BossJobDetailPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.results import DispatchResult
 from bzauto.storage import Storage
@@ -23,6 +25,8 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
         super().__init__(page, session, account_id)
         self._storage = storage
         self._chat_page = BossChatListPage(session)
+        self._detail_page = BossJobDetailPage(session)
+        self._blacklist = get_config().scrape.filter.blacklist
 
     async def run(self, batch_size: int = 50) -> DispatchResult:
         remaining = self._storage.accounts.get_remaining_quota(self._account_id)
@@ -41,6 +45,7 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
 
         success = 0
         failed = 0
+        filtered = 0
 
         for job in jobs:
             job_id = job.job_id
@@ -53,6 +58,24 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 href = job.href
                 full_url = href if href.startswith("http") else f"https://www.zhipin.com{href}"
                 await self._session.ensure_tab(full_url)
+
+                await self._detail_page.wait_jd_loaded()
+                jd = await self._detail_page.get_job_desc()
+                matched_kw = match_blacklist(jd, self._blacklist)
+                if matched_kw:
+                    log.info(
+                        "JD 命中黑名单「%s」，跳过投递: %s — %s",
+                        matched_kw,
+                        job.title,
+                        job.company,
+                    )
+                    self._storage.jobs.mark_filtered(
+                        job_id,
+                        note=f"黑名单: {matched_kw}",
+                        job_desc=jd,
+                    )
+                    filtered += 1
+                    continue
 
                 await self._page.click_chat_on_detail()
 
@@ -87,5 +110,11 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 self._storage.jobs.mark_failed(job_id)
                 failed += 1
 
-        log.info("投递完成: account=%s success=%d failed=%d", self._account_id, success, failed)
-        return DispatchResult(success=success, failed=failed)
+        log.info(
+            "投递完成: account=%s success=%d failed=%d filtered=%d",
+            self._account_id,
+            success,
+            failed,
+            filtered,
+        )
+        return DispatchResult(success=success, failed=failed, filtered=filtered)

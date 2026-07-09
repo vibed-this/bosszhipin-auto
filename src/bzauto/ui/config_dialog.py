@@ -84,7 +84,7 @@ class ConfigDialog(QDialog):
         self._edit_greeting.setMaximumHeight(80)
         self._edit_greeting.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addRow("白名单（逗号分隔）", self._edit_whitelist)
-        layout.addRow("黑名单（逗号分隔）", self._edit_blacklist)
+        layout.addRow("黑名单（逗号分隔，采集 title + 投递 JD）", self._edit_blacklist)
         layout.addRow("薪资下限 (K)", self._spin_min_salary)
         layout.addRow("薪资上限 (K)", self._spin_max_salary)
         layout.addRow("打招呼语", self._edit_greeting)

@@ -114,7 +114,11 @@ class DispatchTask(ScheduledTask):
         if result.skipped:
             reason = result.skip_reason or ""
             return [f"跳过: {reason}" if reason else "跳过"]
-        return [f"投递 {result.success + result.failed} 个 (成功 {result.success}, 失败 {result.failed})"]
+        parts = [f"成功 {result.success}", f"失败 {result.failed}"]
+        if result.filtered:
+            parts.append(f"过滤 {result.filtered}")
+        total = result.success + result.failed + result.filtered
+        return [f"投递 {total} 个 ({', '.join(parts)})"]
 
 
 class ScrapeChatTask(ScheduledTask):

@@ -8,6 +8,7 @@ import re
 from typing import Any, AsyncIterator
 
 from bzauto.browser.session import BrowserSession
+from bzauto.filter import match_blacklist
 from bzauto.models import JobCard
 from bzauto.pages.base import BasePage
 
@@ -340,7 +341,7 @@ class BossJobListPage(BasePage):
             title = card.title.strip().lower()
             if whitelist and not any(kw in title for kw in whitelist):
                 continue
-            if blacklist and any(kw in title for kw in blacklist):
+            if match_blacklist(card.title, blacklist or []):
                 continue
 
             salary = _parse_salary(card.salary)

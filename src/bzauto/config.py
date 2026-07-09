@@ -36,7 +36,7 @@ class ScrapeFilterConfig(BaseModel):
     """采集过滤配置。
 
     :ivar whitelist: 职位名称白名单（包含任一即匹配）
-    :ivar blacklist: 职位名称黑名单（包含任一即排除）
+    :ivar blacklist: 关键字黑名单（采集时匹配 title；投递时再次匹配 JD）
     :ivar min_salary: 最低薪资过滤 (K)
     :ivar max_salary: 最高薪资过滤 (K)
     """

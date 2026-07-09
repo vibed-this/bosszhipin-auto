@@ -20,6 +20,7 @@ class DispatchStatus(StrEnum):
     CLAIMED = "claimed"
     SUCCESS = "success"
     FAILED = "failed"
+    FILTERED = "filtered"
 
 
 class ConvStatus(StrEnum):

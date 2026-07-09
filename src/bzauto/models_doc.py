@@ -27,7 +27,7 @@ class JobDoc(BaseModel):
     :ivar account: 采集账号 ID（记录谁采集的，写入后不变）
     :ivar dispatched_by: 投递账号 ID（记录谁沟通的，由 claim 时设置）
     :ivar status: 业务状态文本（如 "已沟通"）
-    :ivar dispatch_status: 派发状态（pending / claimed / success / failed）
+    :ivar dispatch_status: 派发状态（pending / claimed / success / failed / filtered）
     :ivar dispatched_at: 领取时间 ISO 格式
     :ivar applied_at: 沟通成功时间 ISO 格式
     :ivar last_updated: 最后更新时间 ISO 格式

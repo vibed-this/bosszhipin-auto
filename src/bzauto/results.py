@@ -26,6 +26,7 @@ class ScrapeChatResult(BaseModel):
 class DispatchResult(BaseModel):
     success: int = 0
     failed: int = 0
+    filtered: int = 0
     skipped: bool = False
     skip_reason: str = ""
 
