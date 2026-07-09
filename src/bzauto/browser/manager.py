@@ -217,16 +217,19 @@ class BrowserManager(QMainWindow):
             nav_btn=nav_btn,
         )
 
-    def set_side_panel(self, top: QWidget, bottom: QWidget) -> None:
-        """将控制面板和日志面板嵌入浏览器右侧（垂直分割）。"""
+    def set_side_panel(self, *widgets: QWidget) -> None:
+        """将多个面板垂直嵌入浏览器右侧，最后一个面板可拉伸。"""
+        if not widgets:
+            return
         self._side_splitter = QSplitter(Qt.Vertical)
-        self._side_splitter.addWidget(top)
-        self._side_splitter.addWidget(bottom)
-        self._side_splitter.setStretchFactor(0, 0)
-        self._side_splitter.setStretchFactor(1, 1)
+        for widget in widgets:
+            self._side_splitter.addWidget(widget)
+        for i in range(len(widgets) - 1):
+            self._side_splitter.setStretchFactor(i, 0)
+        self._side_splitter.setStretchFactor(len(widgets) - 1, 1)
         self._splitter.addWidget(self._side_splitter)
         self._splitter.setStretchFactor(0, 1)
-        default_width = 200
+        default_width = 220
         self._splitter.setSizes([self.width() - default_width, default_width])
 
     def _on_tab_changed(self, index: int) -> None:

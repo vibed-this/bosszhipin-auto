@@ -36,6 +36,7 @@ from bzauto.ui.log_window import LogWindow
 from bzauto.ui.config_dialog import ConfigDialog
 from bzauto.ui.data_window import DataWindow
 from bzauto.ui.schedule_window import ScheduleWindow
+from bzauto.ui.status_panel import SideStatusPanel
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -84,6 +85,7 @@ class BzAutoApp:
         _set_browser_manager(self._manager)
 
         self._control = ControlPanel(self._manager)
+        self._status_panel = SideStatusPanel(self._storage, self._manager)
         self._log_win = LogWindow(self._manager)
         self._data_win: DataWindow | None = None
         self._schedule_win: ScheduleWindow | None = None
@@ -103,12 +105,13 @@ class BzAutoApp:
 
     def _setup_ui(self) -> None:
         """配置 UI 布局和信号。"""
-        self._manager.set_side_panel(self._control, self._log_win)
+        self._manager.set_side_panel(self._control, self._status_panel, self._log_win)
         self._manager.show()
 
         # 跨线程信号连接（实际同线程，保留 Signal 接口）
         self._bridge.buttons_enabled.connect(self._control.set_buttons_enabled)
         self._bridge.data_updated.connect(self._on_data_updated)
+        self._bridge.data_updated.connect(self._status_panel.refresh)
         self._bridge.stop_requested.connect(self._on_stop)
 
         # 全局快捷键 — 通过 run_coroutine_threadsafe 投递到 qasync 循环
@@ -247,6 +250,7 @@ class BzAutoApp:
 
         self._bridge.buttons_enabled.emit(False)
         self._bridge.debug_running.emit(True)
+        self._status_panel.refresh()
         log.info("开始 %s...", task.name)
 
         assert self._loop is not None
@@ -281,6 +285,7 @@ class BzAutoApp:
             log.error("任务失败:\n%s", tb)
         self._bridge.buttons_enabled.emit(True)
         self._bridge.debug_running.emit(False)
+        self._status_panel.refresh()
 
     # ── 公共 Debug 方法 ──
 
@@ -440,6 +445,11 @@ class BzAutoApp:
             loop=self._loop,
         )
         self._unread_watcher.start()
+
+        self._status_panel.bind(
+            get_runner=lambda: self._task_runner,
+            get_scheduler=lambda: self._scheduler,
+        )
 
         log.info("系统启动完成: 调度器已运行")
 
