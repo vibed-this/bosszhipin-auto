@@ -180,12 +180,27 @@ class BrowserManager(QMainWindow):
                 raw = "https://" + raw
             page.load(QUrl(raw))
 
-        back_btn.clicked.connect(view.back)
-        forward_btn.clicked.connect(view.forward)
+        def _sync_nav_buttons() -> None:
+            hist = page.history()
+            back_btn.setEnabled(hist.canGoBack())
+            forward_btn.setEnabled(hist.canGoForward())
+
+        def _go_back() -> None:
+            # SPA（Boss 直聘）用 pushState 导航，Qt back() 无效，需走浏览器 history API
+            page.runJavaScript("history.back()")
+
+        def _go_forward() -> None:
+            page.runJavaScript("history.forward()")
+
+        back_btn.clicked.connect(_go_back)
+        forward_btn.clicked.connect(_go_forward)
         refresh_btn.clicked.connect(view.reload)
         url_input.returnPressed.connect(_normalize_and_navigate)
         view.urlChanged.connect(lambda url: url_input.setText(url.toString()))
+        view.urlChanged.connect(lambda _url: _sync_nav_buttons())
         page.loadFinished.connect(lambda _ok: url_input.setText(page.url().toString()))
+        page.loadFinished.connect(lambda _ok: _sync_nav_buttons())
+        _sync_nav_buttons()
 
         nav_layout = QHBoxLayout()
         nav_layout.setContentsMargins(4, 4, 4, 4)
