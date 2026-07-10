@@ -24,6 +24,7 @@ log = logging.getLogger("boss.browser.manager")
 _manager: BrowserManager | None = None
 
 _PROFILES_DIR = "profiles"
+_DEFAULT_TAB_URL = "https://www.zhipin.com/web/geek/chat"
 
 
 class BzWebEnginePage(QWebEnginePage):
@@ -166,7 +167,7 @@ class BrowserManager(QMainWindow):
         nav_menu = QMenu(nav_btn)
         nav_menu.addAction("首页", lambda: page.load(QUrl("https://www.zhipin.com/")))
         nav_menu.addAction("职位", lambda: page.load(QUrl("https://www.zhipin.com/web/geek/jobs?ka=header-jobs")))
-        nav_menu.addAction("消息", lambda: page.load(QUrl("https://www.zhipin.com/web/geek/chat")))
+        nav_menu.addAction("消息", lambda: page.load(QUrl(_DEFAULT_TAB_URL)))
         nav_btn.setMenu(nav_menu)
 
         url_input = QLineEdit()
@@ -231,6 +232,8 @@ class BrowserManager(QMainWindow):
             refresh_btn=refresh_btn,
             nav_btn=nav_btn,
         )
+
+        page.load(QUrl(_DEFAULT_TAB_URL))
 
     def set_side_panel(self, *widgets: QWidget) -> None:
         """将多个面板垂直嵌入浏览器右侧，最后一个面板可拉伸。"""
