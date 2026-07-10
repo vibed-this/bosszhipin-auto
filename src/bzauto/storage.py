@@ -18,7 +18,7 @@ from sqlite_utils.db import NotFoundError
 
 from bzauto.config import get_config
 from bzauto.enums import ConvStatus, DispatchStatus
-from bzauto.models import make_conv_id, make_job_id
+from bzauto.models import is_older_than_week, make_conv_id, make_job_id
 from bzauto.models_doc import AccountDoc, ConvDoc, JobDoc, RunDoc
 
 log = logging.getLogger("boss.storage")
@@ -362,7 +362,7 @@ class ConversationRepo:
         return [ConvDoc(**r) for r in self.db.query(sql, params)]
 
     def list_urge_delivered(self, account: str = "") -> list[ConvDoc]:
-        """查找需二次催促的对话：我方「您好」招呼已送达但未读。
+        """查找需二次催促的对话：我方「您好」招呼已送达未读，且发送超过 7 天。
 
         :param account: 过滤账号 ID，为空时不限账号
         :returns: ConvDoc 列表
@@ -378,7 +378,10 @@ class ConversationRepo:
             params.append(account)
         sql = "SELECT * FROM conversations WHERE " + " AND ".join(where)
         sql += " ORDER BY last_updated DESC"
-        return [ConvDoc(**r) for r in self.db.query(sql, params)]
+        return [
+            doc for doc in (ConvDoc(**r) for r in self.db.query(sql, params))
+            if is_older_than_week(doc.last_msg_time)
+        ]
 
     def delete(self, conv_id: str, account: str) -> None:
         self.tbl.delete((conv_id, account))

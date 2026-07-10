@@ -12,7 +12,7 @@ from bzauto.config import get_config
 from bzauto.models import ChatItem
 from bzauto.models_doc import ConvDoc
 from bzauto.pages.chat_list import CHAT_URL, BossChatListPage
-from bzauto.pages.job_detail import BossJobDetailPage
+# from bzauto.pages.job_detail import BossJobDetailPage
 from bzauto.results import UrgeResult
 from bzauto.storage import Storage
 
@@ -28,12 +28,10 @@ class _UrgeTarget:
 class UrgeFlow:
     """催促流程：查找 DB 中需跟进的对话，重新发送招呼语。
 
-    两类目标：
-    - legacy：我方最后发送、无平台状态、消息内容为空（原逻辑，直接重发）
-    - delivered：「您好」招呼已送达未读，先查职位详情是否仍在招聘，再重发
+    当前仅处理正在交流的目标：
+    - legacy：我方最后发送、无平台状态、消息内容为空（直接重发）
 
-    页面跳转策略：每账号仅一个 QWebEnginePage，无法新开 tab；
-    delivered 类在同一 tab 跳转详情页检查后，再导航回聊天页重选对话。
+    # delivered（已禁用）：「您好」招呼已送达未读且发送超过 7 天，先查职位详情是否仍在招聘，再重发
     """
 
     def __init__(self, page: BossChatListPage, session: BrowserSession, account_id: str, storage: Storage) -> None:
@@ -41,25 +39,24 @@ class UrgeFlow:
         self._session = session
         self._account_id = account_id
         self._storage = storage
-        self._detail_page = BossJobDetailPage(session)
+        # self._detail_page = BossJobDetailPage(session)
 
     async def run(self) -> UrgeResult:
         legacy = self._storage.conversations.list_unreplied(self._account_id)
-        delivered = self._storage.conversations.list_urge_delivered(self._account_id)
+        # delivered = self._storage.conversations.list_urge_delivered(self._account_id)
         targets = (
             [_UrgeTarget(conv=c, kind="legacy") for c in legacy]
-            + [_UrgeTarget(conv=c, kind="delivered") for c in delivered]
+            # + [_UrgeTarget(conv=c, kind="delivered") for c in delivered]
         )
         if not targets:
             log.info("无待催促对话: account=%s", self._account_id)
             return UrgeResult(skipped=True, total=0)
 
         log.info(
-            "开始催促: account=%s total=%d (legacy=%d delivered=%d)",
+            "开始催促: account=%s total=%d (legacy=%d)",
             self._account_id,
             len(targets),
             len(legacy),
-            len(delivered),
         )
         await self._session.ensure_tab(CHAT_URL)
         await self._session.activate()
@@ -81,45 +78,45 @@ class UrgeFlow:
                 by_uid = {item.uniqueId: item for item in all_items if item.uniqueId}
                 by_name = {f"{item.name}:{item.company}": item for item in all_items}
 
-                uid, match = self._resolve_chat_item(target.conv, by_uid, by_name)
+                uid, _ = self._resolve_chat_item(target.conv, by_uid, by_name)
                 if not uid:
                     log.warning("未在页面找到对话: %s·%s", target.conv.name, target.conv.company)
                     failed += 1
                     continue
 
-                if target.kind == "delivered":
-                    job_url = self._job_detail_url(target.conv, match)
-                    if not job_url:
-                        log.warning(
-                            "无职位详情链接，跳过: %s·%s",
-                            target.conv.name,
-                            target.conv.company,
-                        )
-                        failed += 1
-                        continue
-
-                    await self._session.ensure_tab(job_url)
-                    if not await self._detail_page.is_still_recruiting():
-                        status = await self._detail_page.get_job_status()
-                        log.info(
-                            "职位已停招，跳过催促: %s·%s status=%s",
-                            target.conv.name,
-                            target.conv.company,
-                            status,
-                        )
-                        await self._session.ensure_tab(CHAT_URL)
-                        skipped_stopped += 1
-                        continue
-
-                    await self._session.ensure_tab(CHAT_URL)
-                    if not await self._page.wait_chat_list_ready():
-                        log.warning(
-                            "返回聊天页后列表未就绪: %s·%s",
-                            target.conv.name,
-                            target.conv.company,
-                        )
-                        failed += 1
-                        continue
+                # if target.kind == "delivered":
+                #     job_url = self._job_detail_url(target.conv, match)
+                #     if not job_url:
+                #         log.warning(
+                #             "无职位详情链接，跳过: %s·%s",
+                #             target.conv.name,
+                #             target.conv.company,
+                #         )
+                #         failed += 1
+                #         continue
+                #
+                #     await self._session.ensure_tab(job_url)
+                #     if not await self._detail_page.is_still_recruiting():
+                #         status = await self._detail_page.get_job_status()
+                #         log.info(
+                #             "职位已停招，跳过催促: %s·%s status=%s",
+                #             target.conv.name,
+                #             target.conv.company,
+                #             status,
+                #         )
+                #         await self._session.ensure_tab(CHAT_URL)
+                #         skipped_stopped += 1
+                #         continue
+                #
+                #     await self._session.ensure_tab(CHAT_URL)
+                #     if not await self._page.wait_chat_list_ready():
+                #         log.warning(
+                #             "返回聊天页后列表未就绪: %s·%s",
+                #             target.conv.name,
+                #             target.conv.company,
+                #         )
+                #         failed += 1
+                #         continue
 
                 await self._page.click_chat_item(uid)
                 await self._page.wait_conversation_selected(timeout=10)
@@ -169,17 +166,17 @@ class UrgeFlow:
             return match.uniqueId, match
         return None, None
 
-    def _job_detail_url(self, conv: ConvDoc, match: ChatItem | None) -> str:
-        encrypt_job_id = conv.encrypt_job_id or (match.encryptJobId if match else "")
-        if encrypt_job_id:
-            return f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html"
-
-        if conv.linked_job_id:
-            job = self._storage.jobs.get(conv.linked_job_id)
-            if job and job.href:
-                href = job.href
-                return href if href.startswith("http") else f"https://www.zhipin.com{href}"
-
-        if match and match.job_href:
-            return match.job_href
-        return ""
+    # def _job_detail_url(self, conv: ConvDoc, match: ChatItem | None) -> str:
+    #     encrypt_job_id = conv.encrypt_job_id or (match.encryptJobId if match else "")
+    #     if encrypt_job_id:
+    #         return f"https://www.zhipin.com/job_detail/{encrypt_job_id}.html"
+    #
+    #     if conv.linked_job_id:
+    #         job = self._storage.jobs.get(conv.linked_job_id)
+    #         if job and job.href:
+    #             href = job.href
+    #             return href if href.startswith("http") else f"https://www.zhipin.com{href}"
+    #
+    #     if match and match.job_href:
+    #         return match.job_href
+    #     return ""
