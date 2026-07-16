@@ -80,6 +80,7 @@ class ScheduleConfig(BaseModel):
     :ivar dispatch_batch_size: 每批投递数量上限
     :ivar dispatch_total_limit: 单次调度的总沟通上限（跨账号累计）
     :ivar scrape_threshold: 投递前触发采集的 pending 数量下限
+    :ivar scrape_interval_minutes: 采集间隔（分钟）
     :ivar scan_interval_minutes: 消息扫描间隔（分钟）
     :ivar unread_trigger_enabled: 未读角标上升时自动触发单账号消息扫描
     :ivar unread_poll_seconds: 未读角标轮询间隔（秒）
@@ -95,6 +96,7 @@ class ScheduleConfig(BaseModel):
     dispatch_batch_size: int = 20
     dispatch_total_limit: int = 200
     scrape_threshold: int = 50
+    scrape_interval_minutes: int = 20
     scan_interval_minutes: int = 15
     unread_trigger_enabled: bool = True
     unread_poll_seconds: int = 5

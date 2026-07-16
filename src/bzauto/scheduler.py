@@ -220,6 +220,18 @@ class BzScheduler:
                 **parse_cron_time(t), **kwargs,
             )
 
+        nxt = self._load_next_run("scrape")
+        kwargs = dict(
+            misfire_grace_time=_MISFIRE_GRACE,
+            coalesce=True,
+        )
+        if nxt is not None:
+            kwargs["next_run_time"] = nxt
+        self._scheduler.add_job(
+            self._trigger_scrape, 'interval', id="scrape",
+            minutes=cfg.scrape_interval_minutes, **kwargs,
+        )
+
         nxt = self._load_next_run("scrape_chat")
         kwargs = dict(
             misfire_grace_time=_MISFIRE_GRACE,
@@ -436,7 +448,10 @@ class BzScheduler:
         await agg.flush()
 
     async def _trigger_scrape(self) -> None:
-        accounts = self._storage.accounts.list(enabled_only=True)
+        accounts = [a for a in self._storage.accounts.list(enabled_only=True) if a.role == "scraper"]
+        if not accounts:
+            log.info("跳过定时采集: 无 scraper 角色账号")
+            return
         agg = NotificationAggregator(get_notifier(), f"采集报告 {datetime.datetime.now():%m-%d %H:%M}")
         for acc in accounts:
             task = ScrapeTask(acc.account_id, self._storage)
