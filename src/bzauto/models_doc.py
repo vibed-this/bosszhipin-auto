@@ -1,6 +1,6 @@
-"""TinyDB 文档模型 — 与 storage 层的文档形状一一对应。
+"""持久化文档模型（Pydantic）。
 
-每个模型映射一张 TinyDB 表的文档结构，字段名与 DB key 完全一致（snake_case）。
+与 storage 层仓库的文档形状一一对应。字段名与 DB 列一致（snake_case）。
 使用 Pydantic BaseModel 以在 Storage 边界获得类型安全。
 """
 

@@ -30,7 +30,7 @@ uv sync
 | **browser/** | QWebEngineView 内核。每账号独立 Profile/View/Page，支持 JS 执行、DOM 查询、Qt 事件模拟 |
 | **pages/** | 页面对象模型，封装选择器和操作方法 |
 | **flows/** | 业务流程编排（爬取、投递、扫描、删拒） |
-| **Storage** | TinyDB 持久化 |
+| **Storage** | SQLite (sqlite-utils) 持久化 |
 | **Scheduler** | APScheduler 定时调度 |
 
 ## 配置

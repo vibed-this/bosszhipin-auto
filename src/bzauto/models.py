@@ -156,21 +156,6 @@ class JobCard(BaseModel):
     location: str = ""
 
     @classmethod
-    def from_query_row(cls, row: dict[str, Any]) -> JobCard:
-        """从 DOM 查询行构建 JobCard。
-
-        :param row: 查询返回的原始 dict
-        :returns: JobCard 实例
-        """
-        return cls(
-            title=row.get("title") or "",
-            salary=row.get("salary") or "",
-            company=row.get("company") or "",
-            href=row.get("href") or "",
-            location=row.get("location") or "",
-        )
-
-    @classmethod
     def from_vue_row(cls, row: dict[str, Any]) -> JobCard:
         """从 Vue jobList 数据构建 JobCard。
 
@@ -338,7 +323,7 @@ class ChatItem(BaseModel):
 
     :ivar name: 招聘者姓名
     :ivar company: 公司名称
-    :ivar position: HR 头衔（Vue title 字段，兼容旧语义）
+    :ivar position: HR 头衔（对应 Vue source.title）
     :ivar time: 最后消息时间文本（DOM 来源）或时间戳字符串（Vue 来源）
     :ivar lastMsg: 最后一条消息文本
     :ivar status: BOSS 平台状态文本（如 "已读"）
@@ -380,35 +365,6 @@ class ChatItem(BaseModel):
         if self.encryptJobId:
             return f"https://www.zhipin.com/job_detail/{self.encryptJobId}.html"
         return ""
-
-    @classmethod
-    def from_query_row(cls, row: dict[str, Any]) -> ChatItem:
-        """从 DOM 查询行构建 ChatItem。
-
-        :param row: 查询返回的原始 dict
-        :returns: ChatItem 实例
-        """
-        last_msg = row.get("lastMsg") or ""
-        first_child_class = row.get("firstChildClass") or ""
-        sender = "other" if first_child_class == "last-msg-text" else "self"
-        unread_text = row.get("unreadCount")
-        unread_count = int(unread_text) if unread_text and unread_text.strip().isdigit() else 0
-
-        # 文件消息覆写 sender / unread_count
-        if last_msg.lower().endswith(".pdf"):
-            sender = "self"
-            unread_count = -1
-
-        return cls(
-            name=row.get("name") or "",
-            company=row.get("company") or "",
-            position=row.get("position") or "",
-            time=row.get("time") or "",
-            lastMsg=last_msg,
-            status=(row.get("status") or "").strip(" []"),
-            sender=sender,
-            unread_count=unread_count,
-        )
 
     @classmethod
     def from_vue_row(cls, row: dict[str, Any]) -> ChatItem:

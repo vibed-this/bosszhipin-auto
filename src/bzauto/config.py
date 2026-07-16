@@ -26,7 +26,7 @@ class BrowserConfig(BaseModel):
 class StorageConfig(BaseModel):
     """存储配置。
 
-    :ivar db_path: TinyDB 数据库文件路径
+    :ivar db_path: SQLite 数据库文件路径
     """
 
     db_path: str = "data/bzauto.db"

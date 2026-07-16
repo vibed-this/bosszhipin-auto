@@ -164,13 +164,10 @@ class BossChatListPage(BasePage):
     async def get_chat_items(
         self,
         limit: int = 999,
-        *,
-        include_status: bool = False,
     ) -> list[ChatItem]:
         """从 Vue dataSources 读取聊天列表项。
 
         :param limit: 返回上限
-        :param include_status: 已弃用，保留兼容
         :returns: ChatItem 列表
         """
         raw = await self._session.eval_js(_VUE_EXTRACT_DATASOURCES_JS)
@@ -178,11 +175,6 @@ class BossChatListPage(BasePage):
             return []
         items = json.loads(raw) if isinstance(raw, str) else raw
         return [ChatItem.from_vue_row(item) for item in items[:limit]]
-
-    async def get_chat_item_at(self, index: int) -> ChatItem | None:
-        """按 dataSources 索引获取单项（兼容旧接口）。"""
-        items = await self.get_chat_items(limit=index + 1)
-        return items[index] if index < len(items) else None
 
     async def iter_chat_items(
         self,
