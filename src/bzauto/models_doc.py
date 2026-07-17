@@ -32,6 +32,9 @@ class JobDoc(BaseModel):
     :ivar applied_at: 沟通成功时间 ISO 格式
     :ivar last_updated: 最后更新时间 ISO 格式
     :ivar job_desc: 职位描述文本（详情页抓取填充）
+    :ivar experience: 经验要求（详情页）
+    :ivar degree: 学历要求（详情页）
+    :ivar tags: 福利/职位标签列表（详情页 .job-tags）
     :ivar note: 备注
     """
 
@@ -53,6 +56,9 @@ class JobDoc(BaseModel):
     applied_at: str | None = None
     last_updated: str = ""
     job_desc: str = ""
+    experience: str = ""
+    degree: str = ""
+    tags: list[str] = []
     note: str = ""
 
     @field_validator("location", mode="before")
@@ -66,6 +72,29 @@ class JobDoc(BaseModel):
             except (json.JSONDecodeError, TypeError):
                 pass
         return v
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _parse_tags(cls, v: object) -> object:
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return [str(x) for x in parsed]
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if isinstance(v, list):
+            return [str(x) for x in v]
+        return []
+
+    @field_validator("experience", "degree", mode="before")
+    @classmethod
+    def _parse_str_or_empty(cls, v: object) -> object:
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v
+        return str(v) if v else ""
 
 
 class ConvDoc(BaseModel):

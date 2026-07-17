@@ -147,6 +147,7 @@ class JobCard(BaseModel):
     :ivar company: 公司名称
     :ivar href: 职位详情链接
     :ivar location: 地点原始文本（如 "长沙·岳麓区·望城坡"）
+    :ivar tags: 职位标签 / 福利标签（列表页通常为空，详情页抓取填充）
     """
 
     title: str
@@ -154,6 +155,7 @@ class JobCard(BaseModel):
     company: str
     href: str
     location: str = ""
+    tags: list[str] = []
 
     @classmethod
     def from_vue_row(cls, row: dict[str, Any]) -> JobCard:
@@ -175,6 +177,19 @@ class JobCard(BaseModel):
             company=row.get("brandName") or "",
             href=href,
             location=location,
+            tags=row.get("tags") or [],
+        )
+
+    @classmethod
+    def from_query_row(cls, row: dict[str, Any]) -> JobCard:
+        """从 DOM find_all 项目结果构建 JobCard（列表页查询）。"""
+        return cls(
+            title=row.get("title") or "",
+            salary=row.get("salary") or "",
+            company=row.get("company") or "",
+            href=row.get("href") or "",
+            location=row.get("location") or "",
+            tags=row.get("tags") or [],
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -200,6 +215,7 @@ class JobCard(BaseModel):
             href=self.href,
             account=account_id,
             location=location_parts,
+            tags=self.tags,
         )
 
 

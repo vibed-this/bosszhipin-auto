@@ -36,6 +36,8 @@ _JOB_PROJECT = {
     "company": f"{_COMPANY}@text",
     "href": f"{_JOB_LINK}@href",
     "location": f"{_LOCATION}@text",
+    # 尝试抓取列表卡片上可见的标签（如果有），不保证所有卡片都有
+    "tags": [".job-tag@text", ".tag-item@text", ".job-label@text", "span[class*='tag']@text"],
 }
 
 _VUE_EXTRACT_JS = """
@@ -45,6 +47,12 @@ JSON.stringify((function() {
     var list = el.__vue__.jobList;
     if (!Array.isArray(list)) return null;
     return list.map(function(j) {
+        var tags = [];
+        if (Array.isArray(j.welfareList)) tags = tags.concat(j.welfareList);
+        if (Array.isArray(j.tags)) tags = tags.concat(j.tags);
+        // 去重并保留字符串
+        var seen = {};
+        tags = tags.filter(function(t){ return t && !seen[t] && (seen[t]=1); });
         return {
             jobName: j.jobName,
             salaryDesc: j.salaryDesc,
@@ -53,6 +61,7 @@ JSON.stringify((function() {
             cityName: j.cityName,
             areaDistrict: j.areaDistrict,
             businessDistrict: j.businessDistrict,
+            tags: tags,
         };
     });
 })())

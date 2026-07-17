@@ -60,7 +60,20 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 await self._session.ensure_tab(full_url)
 
                 await self._detail_page.wait_jd_loaded()
+
+                # 抓取详情页元数据（包含 tags）和职位描述
+                meta = await self._detail_page.get_job_meta()
                 jd = await self._detail_page.get_job_desc()
+
+                # 持久化 tags / experience / degree / job_desc（无论是否过滤）
+                self._storage.jobs.update_meta(
+                    job_id,
+                    tags=meta.tags,
+                    job_desc=jd,
+                    experience=meta.experience,
+                    degree=meta.degree,
+                )
+
                 matched_kw = match_blacklist(jd, self._blacklist)
                 if matched_kw:
                     log.info(
@@ -72,7 +85,6 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                     self._storage.jobs.mark_filtered(
                         job_id,
                         note=f"黑名单: {matched_kw}",
-                        job_desc=jd,
                     )
                     filtered += 1
                     continue

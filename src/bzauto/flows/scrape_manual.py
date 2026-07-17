@@ -1,12 +1,14 @@
 """纯爬取流程编排：只收集职位数据，不执行沟通（带 DB upsert）。"""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from bzauto.config import get_config
 from bzauto.browser.session import BrowserSession
 from bzauto.flows.base import BaseFlow
-from bzauto.models import JobCard
+from bzauto.models import JobCard, make_job_id
+from bzauto.pages.job_detail import BossJobDetailPage
 from bzauto.pages.job_list import BossJobListPage
 from bzauto.storage import Storage
 
@@ -25,6 +27,7 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
         self._min_salary = cfg.scrape.filter.min_salary
         self._max_salary = cfg.scrape.filter.max_salary
         self._jobs_url = "https://www.zhipin.com/web/geek/jobs"
+        self._detail_page: BossJobDetailPage | None = BossJobDetailPage(session) if session is not None else None
 
     def _iter_cards(
         self,
@@ -88,6 +91,49 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
             if len(all_jobs) >= max_jobs:
                 log.info("已达采集上限 %d 条，停止", max_jobs)
                 break
+
+        log.info("完成列表采集: 共 %d 条匹配职位", len(all_jobs))
+
+        # 每次爬取后实时抓取详情页数据（tags、experience、degree、job_desc）并写回
+        if self._storage and self._detail_page and all_jobs:
+            log.info("开始实时抓取详情元数据并写回...")
+            enriched = 0
+            for i, card in enumerate(all_jobs, 1):
+                try:
+                    job_id = make_job_id(card.href)
+
+                    # 已有 tags 则跳过详情抓取（支持已有数据的情况）
+                    existing = self._storage.jobs.get(job_id)
+                    if existing and existing.tags and any(str(t).strip() for t in existing.tags):
+                        continue
+
+                    full_url = card.href if card.href.startswith("http") else f"https://www.zhipin.com{card.href}"
+                    await self._session.ensure_tab(full_url)
+
+                    await self._detail_page.wait_jd_loaded(timeout=25)
+                    await asyncio.sleep(1.0)
+
+                    meta = await self._detail_page.get_job_meta()
+                    jd = await self._detail_page.get_job_desc()
+
+                    self._storage.jobs.update_meta(
+                        job_id,
+                        tags=meta.tags,
+                        job_desc=jd,
+                        experience=meta.experience,
+                        degree=meta.degree,
+                    )
+                    enriched += 1
+
+                    if i % 10 == 0 or i == len(all_jobs):
+                        log.info("  详情写回进度: %d/%d (tags=%d)", i, len(all_jobs), len(meta.tags))
+
+                    # 礼貌延迟，避免频繁访问详情页
+                    await asyncio.sleep(1.8)
+                except Exception as e:
+                    log.warning("  详情元数据抓取失败: %s - %s", card.title, e)
+
+            log.info("详情元数据实时写回完成: %d/%d", enriched, len(all_jobs))
 
         log.info("完成: 共 %d 条匹配职位", len(all_jobs))
         return all_jobs

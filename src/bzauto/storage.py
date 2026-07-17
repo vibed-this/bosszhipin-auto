@@ -62,6 +62,7 @@ class JobRepo:
             data["job_id"] = data.get("job_id") or make_job_id(doc.href)
             data.setdefault("last_updated", now)
             self.tbl.insert(data)
+        self.db.conn.commit()  # 实时写回
 
     def get(self, job_id: str) -> JobDoc | None:
         try:
@@ -113,6 +114,7 @@ class JobRepo:
             "WHERE job_id=?",
             (DispatchStatus.SUCCESS, "已沟通", now, now, job_id),
         )
+        self.db.conn.commit()
         log.debug("job 成功: %s", job_id)
 
     def mark_failed(self, job_id: str) -> None:
@@ -121,6 +123,7 @@ class JobRepo:
             "UPDATE jobs SET dispatch_status=?, last_updated=? WHERE job_id=?",
             (DispatchStatus.FAILED, now, job_id),
         )
+        self.db.conn.commit()
         log.debug("job 失败: %s", job_id)
 
     def mark_filtered(
@@ -137,7 +140,44 @@ class JobRepo:
             "WHERE job_id=?",
             (DispatchStatus.FILTERED, note, job_desc, now, job_id),
         )
+        self.db.conn.commit()
         log.info("job 黑名单过滤: %s note=%s", job_id, note)
+
+    def update_meta(
+        self,
+        job_id: str,
+        *,
+        tags: list[str] | None = None,
+        job_desc: str = "",
+        experience: str = "",
+        degree: str = "",
+    ) -> None:
+        """更新职位详情页抓取到的元数据（tags、描述、经验、学历等）。"""
+        now = _now_iso()
+        sets: list[str] = []
+        params: list[Any] = []
+        if tags is not None:
+            sets.append("tags=?")
+            params.append(json.dumps(tags, ensure_ascii=False))
+        if job_desc:
+            sets.append("job_desc=?")
+            params.append(job_desc)
+        if experience:
+            sets.append("experience=?")
+            params.append(experience)
+        if degree:
+            sets.append("degree=?")
+            params.append(degree)
+        if not sets:
+            return
+        sets.append("last_updated=?")
+        params.append(now)
+        sql = f"UPDATE jobs SET {', '.join(sets)} WHERE job_id=?"
+        params.append(job_id)
+        self.db.conn.execute(sql, params)
+        self.db.conn.commit()  # 确保实时写回
+        tag_count = len(tags) if isinstance(tags, list) else 0
+        log.debug("job meta 更新: %s tags=%s", job_id, tag_count)
 
     def release_stale_claims(self, timeout_minutes: int = 30) -> int:
         now = _now_iso()
@@ -598,6 +638,8 @@ class SeenHrefsRepo:
                 count += 1
             except Exception:
                 pass
+        if count:
+            self.db.conn.commit()  # 实时写回
         return count
 
     def count(self) -> int:
@@ -657,6 +699,9 @@ class Storage:
             "applied_at": str,
             "last_updated": str,
             "job_desc": str,
+            "experience": str,
+            "degree": str,
+            "tags": str,
             "note": str,
         }, pk="job_id", if_not_exists=True)
         self.db.conn.execute(
@@ -669,6 +714,9 @@ class Storage:
         self.db.conn.execute(
             "CREATE INDEX IF NOT EXISTS [idx_jobs_last_updated] ON [jobs]([last_updated])",
         )
+
+        # 向后兼容：为已有旧数据库添加 tags / experience / degree 列
+        self._ensure_job_columns()
 
         # conversations
         self.db["conversations"].create({
@@ -736,6 +784,26 @@ class Storage:
         self.db["seen_job_hrefs"].create({
             "href": str,
         }, pk="href", if_not_exists=True)
+
+    def _ensure_job_columns(self) -> None:
+        """为旧版 jobs 表补齐新增的列（幂等）。"""
+        conn = self.db.conn
+        assert conn is not None
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+        to_add = []
+        if "experience" not in existing_cols:
+            to_add.append(("experience", "TEXT"))
+        if "degree" not in existing_cols:
+            to_add.append(("degree", "TEXT"))
+        if "tags" not in existing_cols:
+            to_add.append(("tags", "TEXT"))
+        for col_name, col_type in to_add:
+            try:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {col_name} {col_type}")
+                log.info("已为 jobs 表添加列: %s", col_name)
+            except Exception as e:
+                # 可能已存在或并发，忽略
+                log.debug("添加列 %s 失败（可忽略）: %s", col_name, e)
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
