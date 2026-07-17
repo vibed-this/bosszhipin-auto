@@ -7,7 +7,7 @@ import random
 
 from bzauto.browser.session import BrowserSession
 from bzauto.config import get_config
-from bzauto.filter import match_blacklist
+from bzauto.filter import match_blacklist, match_city_blacklist
 from bzauto.flows.base import BaseFlow
 from bzauto.pages.chat_list import BossChatListPage
 from bzauto.pages.job_detail import BossJobDetailPage
@@ -26,7 +26,10 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
         self._storage = storage
         self._chat_page = BossChatListPage(session)
         self._detail_page = BossJobDetailPage(session)
-        self._blacklist = get_config().scrape.filter.blacklist
+        cfg_filter = get_config().scrape.filter
+        self._blacklist = cfg_filter.blacklist
+        self._city_blacklist = cfg_filter.city_blacklist
+        self._company_blacklist = cfg_filter.company_blacklist
 
     async def run(self, batch_size: int = 50) -> DispatchResult:
         remaining = self._storage.accounts.get_remaining_quota(self._account_id)
@@ -52,6 +55,17 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
             claimed = self._storage.jobs.claim(job_id, self._account_id)
             if not claimed:
                 log.debug("job 已被领取: %s", job_id)
+                continue
+
+            # 投递前再次用城市/公司黑名单防御过滤（使用 DB 中已存数据）
+            city = (job.location[0] if job.location else "") if isinstance(job.location, list) else ""
+            matched_city = match_city_blacklist(city or job.location, self._city_blacklist)
+            matched_company = match_blacklist(job.company, self._company_blacklist)
+            if matched_city or matched_company:
+                reason = f"城市黑名单: {matched_city}" if matched_city else f"公司黑名单: {matched_company}"
+                log.info("%s，跳过投递: %s — %s", reason, job.title, job.company)
+                self._storage.jobs.mark_filtered(job_id, note=reason)
+                filtered += 1
                 continue
 
             try:

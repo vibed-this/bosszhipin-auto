@@ -8,7 +8,7 @@ import re
 from typing import Any, AsyncIterator
 
 from bzauto.browser.session import BrowserSession
-from bzauto.filter import match_blacklist
+from bzauto.filter import match_blacklist, match_city_blacklist
 from bzauto.models import JobCard
 from bzauto.pages.base import BasePage
 
@@ -334,13 +334,15 @@ class BossJobListPage(BasePage):
         *,
         whitelist: list[str] | None = None,
         blacklist: list[str] | None = None,
+        city_blacklist: list[str] | None = None,
+        company_blacklist: list[str] | None = None,
         min_salary: int | None = None,
         max_salary: int | None = None,
         max_scrolls: int = 10,
         scroll_timeout: float = 5.0,
         max_jobs: int = 0,
     ) -> AsyncIterator[tuple[JobCard, int]]:
-        """包装 iter_job_cards，按白名单/黑名单/薪资过滤并去重。"""
+        """包装 iter_job_cards，按白名单/黑名单/城市/公司/薪资过滤并去重。"""
         seen: set[tuple[str, str]] = set()
         async for card, idx in self.iter_job_cards(
             max_scrolls=max_scrolls,
@@ -351,6 +353,12 @@ class BossJobListPage(BasePage):
             if whitelist and not any(kw in title for kw in whitelist):
                 continue
             if match_blacklist(card.title, blacklist or []):
+                continue
+
+            # 城市完整匹配 + 公司关键字匹配
+            if match_city_blacklist(card.location, city_blacklist or []):
+                continue
+            if match_blacklist(card.company, company_blacklist or []):
                 continue
 
             salary = _parse_salary(card.salary)

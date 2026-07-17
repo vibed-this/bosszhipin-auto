@@ -37,12 +37,16 @@ class ScrapeFilterConfig(BaseModel):
 
     :ivar whitelist: 职位名称白名单（包含任一即匹配）
     :ivar blacklist: 关键字黑名单（采集时匹配 title；投递时再次匹配 JD）
+    :ivar city_blacklist: 城市黑名单（完整匹配第一级城市名，如 "杭州"）
+    :ivar company_blacklist: 公司黑名单（关键字匹配，类似 title 黑名单）
     :ivar min_salary: 最低薪资过滤 (K)
     :ivar max_salary: 最高薪资过滤 (K)
     """
 
     whitelist: list[str] = ["前端", "全栈", "Web"]
     blacklist: list[str] = ["出差"]
+    city_blacklist: list[str] = []
+    company_blacklist: list[str] = []
     min_salary: int = 5
     max_salary: int = 7
 
@@ -197,6 +201,8 @@ greeting = ""
 [scrape.filter]
 whitelist = ["前端", "全栈", "Web"]
 blacklist = ["出差"]
+city_blacklist = []
+company_blacklist = []
 min_salary = 5
 max_salary = 7
 

@@ -24,6 +24,8 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
         cfg = get_config()
         self._whitelist = cfg.scrape.filter.whitelist
         self._blacklist = cfg.scrape.filter.blacklist
+        self._city_blacklist = cfg.scrape.filter.city_blacklist
+        self._company_blacklist = cfg.scrape.filter.company_blacklist
         self._min_salary = cfg.scrape.filter.min_salary
         self._max_salary = cfg.scrape.filter.max_salary
         self._jobs_url = "https://www.zhipin.com/web/geek/jobs"
@@ -35,6 +37,8 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
         max_scrolls: int = 10,
         whitelist: list[str] | None = None,
         blacklist: list[str] | None = None,
+        city_blacklist: list[str] | None = None,
+        company_blacklist: list[str] | None = None,
         min_salary: int | None = None,
         max_salary: int | None = None,
         max_jobs: int = 0,
@@ -42,6 +46,8 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
         return self._page.iter_filtered_cards(
             whitelist=whitelist or self._whitelist,
             blacklist=blacklist or self._blacklist,
+            city_blacklist=city_blacklist or self._city_blacklist,
+            company_blacklist=company_blacklist or self._company_blacklist,
             min_salary=min_salary if min_salary is not None else self._min_salary,
             max_salary=max_salary if max_salary is not None else self._max_salary,
             max_scrolls=max_scrolls,
