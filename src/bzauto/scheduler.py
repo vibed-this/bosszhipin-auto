@@ -388,6 +388,11 @@ class BzScheduler:
                 status = "skipped"
             log.info("[%s] %s 完成 — %s", trigger, acc.name or acc.account_id, status)
             return result
+        except asyncio.CancelledError:
+            status = "cancelled"
+            error = "任务被取消"
+            log.info("[%s] %s 被取消", trigger, acc.name or acc.account_id)
+            raise
         except Exception:
             status = "failed"
             error = traceback.format_exc()
