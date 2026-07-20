@@ -330,6 +330,31 @@ class CityPickerDialog(QDialog):
                 acc.append(item.text())
 
 
+class ListEditorDialog(QDialog):
+    """多行文本编辑对话框：每行一个项目，用于编辑逗号分隔的列表配置字段。"""
+
+    def __init__(self, parent=None, title: str = "", items: list[str] | None = None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumSize(420, 320)
+
+        layout = QVBoxLayout(self)
+        self._editor = QPlainTextEdit()
+        self._editor.setPlainText("\n".join(items or []))
+        self._editor.setPlaceholderText("每行一个项目")
+        layout.addWidget(self._editor)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        layout.addWidget(btn_box)
+
+    def get_items(self) -> list[str]:
+        return [l.strip() for l in self._editor.toPlainText().split("\n") if l.strip()]
+
+
 class ConfigDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -356,10 +381,6 @@ class ConfigDialog(QDialog):
         self._tabs.addTab(self._tab_notify, "通知")
         self._build_notify_tab()
 
-        self._tab_accounts = QWidget()
-        self._tabs.addTab(self._tab_accounts, "账号")
-        self._build_accounts_tab()
-
         btn_layout = QHBoxLayout()
         btn_save = QPushButton("保存")
         btn_save.clicked.connect(self._on_save)
@@ -372,12 +393,35 @@ class ConfigDialog(QDialog):
         btn_layout.addWidget(btn_reload)
         layout.addLayout(btn_layout)
 
+    # ----- 列表编辑器辅助方法 -----
+
+    def _make_list_editor_button(self, line_edit: QLineEdit, title: str) -> QPushButton:
+        btn = QPushButton("编辑")
+        btn.clicked.connect(lambda: self._on_edit_list(line_edit, title))
+        return btn
+
+    def _on_edit_list(self, line_edit: QLineEdit, title: str):
+        items = [s.strip() for s in line_edit.text().split(",") if s.strip()]
+        dlg = ListEditorDialog(self, title=title, items=items)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            line_edit.setText(", ".join(dlg.get_items()))
+
+    def _wrap_list_editor(self, line_edit: QLineEdit, title: str) -> QWidget:
+        row = QWidget()
+        hbox = QHBoxLayout(row)
+        hbox.setContentsMargins(0, 0, 0, 0)
+        hbox.addWidget(line_edit)
+        hbox.addWidget(self._make_list_editor_button(line_edit, title))
+        return row
+
+    # ----- 标签页构建 -----
+
     def _build_scrape_tab(self):
         layout = QFormLayout(self._tab_scrape)
         self._edit_whitelist = QLineEdit()
         self._edit_blacklist = QLineEdit()
 
-        # 城市黑名单：输入框 + 选择按钮（弹出 checkbox treeview）
+        # 城市黑名单：输入框 + 选择按钮 + 编辑按钮
         self._edit_city_blacklist = QLineEdit()
         self._btn_select_city = QPushButton("选择...")
         self._btn_select_city.setToolTip("打开城市选择器（搜索 + 复选树）")
@@ -387,22 +431,21 @@ class ConfigDialog(QDialog):
         city_hbox.setContentsMargins(0, 0, 0, 0)
         city_hbox.addWidget(self._edit_city_blacklist)
         city_hbox.addWidget(self._btn_select_city)
+        city_hbox.addWidget(self._make_list_editor_button(self._edit_city_blacklist, "编辑城市黑名单"))
 
         self._edit_company_blacklist = QLineEdit()
 
         self._spin_min_salary = QSpinBox()
-        self._spin_min_salary.setRange(0, 100)
         self._spin_max_salary = QSpinBox()
-        self._spin_max_salary.setRange(0, 100)
         self._edit_greeting = QPlainTextEdit()
         self._edit_greeting.setPlaceholderText("必填。自动跳转聊天页并发送此消息")
         self._edit_greeting.setMaximumHeight(80)
         self._edit_greeting.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
-        layout.addRow("白名单（逗号分隔）", self._edit_whitelist)
-        layout.addRow("黑名单（逗号分隔，采集 title + 投递 JD）", self._edit_blacklist)
+        layout.addRow("白名单（逗号分隔）", self._wrap_list_editor(self._edit_whitelist, "编辑白名单"))
+        layout.addRow("黑名单（逗号分隔，采集 title + 投递 JD）", self._wrap_list_editor(self._edit_blacklist, "编辑黑名单"))
         layout.addRow("城市黑名单（完整匹配）", city_row)
-        layout.addRow("公司黑名单（关键字匹配）", self._edit_company_blacklist)
+        layout.addRow("公司黑名单（关键字匹配）", self._wrap_list_editor(self._edit_company_blacklist, "编辑公司黑名单"))
         layout.addRow("薪资下限 (K)", self._spin_min_salary)
         layout.addRow("薪资上限 (K)", self._spin_max_salary)
         layout.addRow("打招呼语", self._edit_greeting)
@@ -425,7 +468,7 @@ class ConfigDialog(QDialog):
         self._spin_unread_cooldown.setSuffix(" 分钟")
         self._edit_delete_chat_time = QLineEdit()
         self._edit_delete_chat_time.setPlaceholderText("03:00")
-        layout.addRow("投递时间", self._edit_dispatch_times)
+        layout.addRow("投递时间", self._wrap_list_editor(self._edit_dispatch_times, "编辑投递时间"))
         layout.addRow("批量大小", self._spin_batch_size)
         layout.addRow("消息扫描间隔", self._spin_scan_interval)
         layout.addRow("", self._check_unread_trigger)
@@ -458,13 +501,6 @@ class ConfigDialog(QDialog):
         row.addWidget(hint)
         row.addStretch()
         layout.addRow("", row)
-
-    def _build_accounts_tab(self):
-        layout = QVBoxLayout(self._tab_accounts)
-        label = QLabel("账号管理已移至独立窗口，点击控制台「账号」按钮管理。")
-        label.setStyleSheet("color: gray; font-size: 13px;")
-        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(label)
 
     def _load_config(self):
         cfg = self._cfg
