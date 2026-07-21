@@ -60,10 +60,6 @@ def cli_main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
     for _log_name in ("httpcore", "httpx", "qasync", "apscheduler", "asyncio"):
         logging.getLogger(_log_name).setLevel(logging.WARNING)
-    log.info("按 Ctrl+E 强制退出")
-
-    keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
-
     app = QApplication(sys.argv)
     loop = qasync.QEventLoop(app)
     asyncio.set_event_loop(loop)

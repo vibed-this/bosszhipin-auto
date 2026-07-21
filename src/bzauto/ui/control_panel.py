@@ -102,10 +102,10 @@ class ControlPanel(QWidget):
         sep_stop.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep_stop)
 
-        # Row: 启动调度 + 停止调度 (Ctrl+W)
+        # Row: 启动调度 + 停止调度
         layout.addSpacing(2)
         self.btn_start_scheduler = QPushButton("启动调度")
-        self.btn_stop_scheduler = QPushButton("停止调度 (Ctrl+W)")
+        self.btn_stop_scheduler = QPushButton("停止调度")
         _add_btn_row([self.btn_start_scheduler, self.btn_stop_scheduler])
 
         # 取消任务 (full width)
@@ -121,9 +121,9 @@ class ControlPanel(QWidget):
         sep3.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep3)
 
-        # 退出 (Ctrl+E) (full width)
+        # 退出 (full width)
         layout.addSpacing(2)
-        self.btn_exit = QPushButton("退出 (Ctrl+E)")
+        self.btn_exit = QPushButton("退出")
         self.btn_exit.setFixedHeight(28)
         self.btn_exit.clicked.connect(QApplication.quit)
         layout.addWidget(self.btn_exit)

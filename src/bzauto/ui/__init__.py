@@ -5,12 +5,10 @@ from __future__ import annotations
 import asyncio
 import datetime
 import logging
-import os
 import sys
 import traceback
 from typing import TYPE_CHECKING, Any
 
-import keyboard
 import qasync
 
 from PySide6.QtCore import Signal, QObject
@@ -118,18 +116,6 @@ class BzAutoApp:
         self._bridge.data_updated.connect(self._on_data_updated)
         self._bridge.data_updated.connect(self._status_panel.refresh)
         self._bridge.stop_requested.connect(self._on_stop)
-
-        # 全局快捷键 — 通过 run_coroutine_threadsafe 投递到 qasync 循环
-        keyboard.add_hotkey("ctrl+e", lambda: os._exit(0))
-        def _stop_threadsafe() -> None:
-            if self._loop is None:
-                return
-            f = asyncio.run_coroutine_threadsafe(self._async_stop(), self._loop)
-            try:
-                f.result(timeout=5)
-            except Exception:
-                pass
-        keyboard.add_hotkey("ctrl+w", _stop_threadsafe)
 
         # 连接按钮信号
         self._control.btn_scrape_chat.clicked.connect(lambda: self._on_scrape_chat())
