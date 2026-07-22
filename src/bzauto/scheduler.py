@@ -457,12 +457,11 @@ class BzScheduler:
         if not accounts:
             log.info("跳过定时采集: 无 scraper 角色账号")
             return
-        agg = NotificationAggregator(get_notifier(), f"采集报告 {datetime.datetime.now():%m-%d %H:%M}")
         for acc in accounts:
             task = ScrapeTask(acc.account_id, self._storage)
             result = await self._run_and_record("采集", acc, task)
-            agg.add_section(acc.name or acc.account_id, task.format_result(result))
-        await agg.flush()
+            lines = task.format_result(result)
+            log.info("[采集] %s: %s", acc.name or acc.account_id, ", ".join(lines))
 
     async def _scrape_chat_account(
         self, account_id: str, trigger: str,
@@ -506,7 +505,6 @@ class BzScheduler:
 
     async def _trigger_urge(self) -> None:
         accounts = self._storage.accounts.list(enabled_only=True)
-        agg = NotificationAggregator(get_notifier(), f"催促 {datetime.datetime.now():%m-%d %H:%M}")
         any_urged = False
         for acc in accounts:
             task = UrgeTask(acc.account_id, self._storage)
@@ -514,15 +512,12 @@ class BzScheduler:
             lines = task.format_result(result)
             if lines is not None:
                 any_urged = True
-                agg.add_section(acc.name or acc.account_id, lines)
-        if any_urged:
-            await agg.flush()
-        else:
+                log.info("[催促] %s: %s", acc.name or acc.account_id, ", ".join(lines))
+        if not any_urged:
             log.info("[催促] 全部账号无待催促，跳过通知")
 
     async def _trigger_delete_chat(self) -> None:
         accounts = self._storage.accounts.list(enabled_only=True)
-        agg = NotificationAggregator(get_notifier(), f"消息删拒 {datetime.datetime.now():%m-%d %H:%M}")
         any_deleted = False
         for acc in accounts:
             task = DeleteChatTask(acc.account_id, self._storage)
@@ -530,10 +525,8 @@ class BzScheduler:
             lines = task.format_result(result)
             if lines is not None:
                 any_deleted = True
-                agg.add_section(acc.name or acc.account_id, lines)
-        if any_deleted:
-            await agg.flush()
-        else:
+                log.info("[消息删拒] %s: %s", acc.name or acc.account_id, ", ".join(lines))
+        if not any_deleted:
             log.info("[消息删拒] 全部账号无删除，跳过通知")
 
 
