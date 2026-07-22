@@ -122,6 +122,8 @@ class BossJobDetailPage(BasePage):
                     break
                 await asyncio.sleep(0.5)
 
+        is_headhunter = await self.is_headhunter()
+
         return JobDetailMeta(
             title=clean_boss_detail_text((title or {}).get("text", "")),
             salary=salary_text,
@@ -129,7 +131,19 @@ class BossJobDetailPage(BasePage):
             experience=clean_boss_detail_text((experience or {}).get("text", "")),
             degree=clean_boss_detail_text((degree or {}).get("text", "")),
             tags=tags,
+            is_headhunter=is_headhunter,
         )
+
+    async def is_headhunter(self) -> bool:
+        """通过招聘方身份信息判断是否为猎头职位。"""
+        items = await self._session.find_all(
+            select=".boss-info-attr",
+            project={"text": "@text"},
+        )
+        if items:
+            text = items[0].get("text", "")
+            return "猎头" in text
+        return False
 
     async def click_chat(self) -> None:
         """点击立即沟通按钮。"""

@@ -229,6 +229,7 @@ class JobDetailMeta(BaseModel):
     experience: str = ""
     degree: str = ""
     tags: list[str] = []
+    is_headhunter: bool = False
 
 
 class ChatMessage(BaseModel):

@@ -151,8 +151,9 @@ class JobRepo:
         job_desc: str = "",
         experience: str = "",
         degree: str = "",
+        is_headhunter: bool | None = None,
     ) -> None:
-        """更新职位详情页抓取到的元数据（tags、描述、经验、学历等）。"""
+        """更新职位详情页抓取到的元数据（tags、描述、经验、学历、猎头标识等）。"""
         now = _now_iso()
         sets: list[str] = []
         params: list[Any] = []
@@ -168,6 +169,9 @@ class JobRepo:
         if degree:
             sets.append("degree=?")
             params.append(degree)
+        if is_headhunter is not None:
+            sets.append("is_headhunter=?")
+            params.append(1 if is_headhunter else 0)
         if not sets:
             return
         sets.append("last_updated=?")
@@ -177,7 +181,7 @@ class JobRepo:
         self.db.conn.execute(sql, params)
         self.db.conn.commit()  # 确保实时写回
         tag_count = len(tags) if isinstance(tags, list) else 0
-        log.debug("job meta 更新: %s tags=%s", job_id, tag_count)
+        log.debug("job meta 更新: %s tags=%s is_headhunter=%s", job_id, tag_count, is_headhunter)
 
     def release_stale_claims(self, timeout_minutes: int = 30) -> int:
         now = _now_iso()
@@ -832,6 +836,8 @@ class Storage:
             to_add.append(("degree", "TEXT"))
         if "tags" not in existing_cols:
             to_add.append(("tags", "TEXT"))
+        if "is_headhunter" not in existing_cols:
+            to_add.append(("is_headhunter", "INTEGER DEFAULT 0"))
         for col_name, col_type in to_add:
             try:
                 conn.execute(f"ALTER TABLE jobs ADD COLUMN {col_name} {col_type}")

@@ -79,14 +79,24 @@ class DispatchFlow(BaseFlow[BossJobListPage]):
                 meta = await self._detail_page.get_job_meta()
                 jd = await self._detail_page.get_job_desc()
 
-                # 持久化 tags / experience / degree / job_desc（无论是否过滤）
+                # 持久化 tags / experience / degree / job_desc / is_headhunter（无论是否过滤）
                 self._storage.jobs.update_meta(
                     job_id,
                     tags=meta.tags,
                     job_desc=jd,
                     experience=meta.experience,
                     degree=meta.degree,
+                    is_headhunter=meta.is_headhunter,
                 )
+
+                if meta.is_headhunter and get_config().scrape.skip_headhunter:
+                    log.info("猎头职位，跳过投递: %s — %s", job.title, job.company)
+                    self._storage.jobs.mark_filtered(
+                        job_id,
+                        note="猎头职位",
+                    )
+                    filtered += 1
+                    continue
 
                 matched_kw = match_blacklist(jd, self._blacklist)
                 if matched_kw:

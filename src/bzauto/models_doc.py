@@ -59,6 +59,7 @@ class JobDoc(BaseModel):
     experience: str = ""
     degree: str = ""
     tags: list[str] = []
+    is_headhunter: bool = False
     note: str = ""
 
     @field_validator("location", mode="before")

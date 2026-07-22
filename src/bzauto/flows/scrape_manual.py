@@ -128,6 +128,7 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
                         job_desc=jd,
                         experience=meta.experience,
                         degree=meta.degree,
+                        is_headhunter=meta.is_headhunter,
                     )
                     enriched += 1
 
