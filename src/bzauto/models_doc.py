@@ -134,6 +134,8 @@ class ConvDoc(BaseModel):
     status: str = ConvStatus.NONE
     sender: str = ""
     unread_count: int = 0
+    last_msg_id: int = 0
+    last_notified_msg_key: str = ""
     status_changed_at: str | None = None
     linked_job_id: str | None = None
     first_seen_at: str = ""
@@ -202,6 +204,5 @@ class RunDoc(BaseModel):
             except (json.JSONDecodeError, TypeError):
                 return {}
         return v if isinstance(v, dict) else {}
-
 
 

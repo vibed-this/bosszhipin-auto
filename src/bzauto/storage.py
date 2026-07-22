@@ -259,9 +259,12 @@ class ConversationRepo:
             existing = None
         now = _now_iso()
         if existing:
-            update_data = doc.model_dump(exclude={"conv_id", "account"}, exclude_none=True)
+            update_data = doc.model_dump(
+                exclude={"conv_id", "account", "last_notified_msg_key"},
+                exclude_none=True,
+            )
             update_data = {k: v for k, v in update_data.items() if v != ""}
-            tracked_keys = {"last_msg", "last_msg_time", "platform_status", "sender", "unread_count", "position"}
+            tracked_keys = {"last_msg", "last_msg_time", "platform_status", "sender", "unread_count", "last_msg_id", "position"}
             has_changes = any(
                 key in update_data and str(update_data[key]) != str(existing.get(key, ""))
                 for key in tracked_keys
@@ -283,7 +286,7 @@ class ConversationRepo:
         from bzauto.models import infer_status
         new_count = updated_count = 0
         now = _now_iso()
-        tracked_keys = {"last_msg", "last_msg_time", "platform_status", "sender", "unread_count", "position"}
+        tracked_keys = {"last_msg", "last_msg_time", "platform_status", "sender", "unread_count", "last_msg_id", "position"}
 
         conn = self.db.conn
         assert conn is not None
@@ -312,7 +315,10 @@ class ConversationRepo:
                     old = ConvDoc(**existing)
                     old_status = old.status or ConvStatus.NONE
                     new_status = infer_status(item.sender, item.unread_count, old_status, doc.last_msg_time)
-                    update_data = doc.model_dump(exclude={"conv_id", "account"}, exclude_none=True)
+                    update_data = doc.model_dump(
+                        exclude={"conv_id", "account", "last_notified_msg_key"},
+                        exclude_none=True,
+                    )
                     update_data = {k: v for k, v in update_data.items() if v != ""}
                     has_changes = any(
                         key in update_data and str(update_data[key]) != str(existing.get(key, ""))
@@ -329,6 +335,32 @@ class ConversationRepo:
                     updated_count += 1
 
         return new_count, updated_count
+
+    def list_unnotified_unread(self, account_id: str, items: list[Any]) -> list[Any]:
+        """返回尚未成功推送过的未读会话。"""
+        result = []
+        for item in items:
+            doc = item.to_doc(account_id)
+            try:
+                existing = self.tbl.get((doc.conv_id, account_id))
+            except NotFoundError:
+                existing = None
+            if not existing or existing.get("last_notified_msg_key", "") != item.notification_key:
+                result.append(item)
+        return result
+
+    def mark_unread_notified(self, account_id: str, items: list[Any]) -> None:
+        """在通知成功后记录各会话最后已推送的消息键。"""
+        conn = self.db.conn
+        assert conn is not None
+        with conn:
+            for item in items:
+                doc = item.to_doc(account_id)
+                conn.execute(
+                    "UPDATE conversations SET last_notified_msg_key=? "
+                    "WHERE conv_id=? AND account=?",
+                    (item.notification_key, doc.conv_id, account_id),
+                )
 
     def get(self, conv_id: str, account: str = "") -> ConvDoc | None:
         if account:
@@ -731,6 +763,8 @@ class Storage:
             "status": str,
             "sender": str,
             "unread_count": int,
+            "last_msg_id": int,
+            "last_notified_msg_key": str,
             "status_changed_at": str,
             "linked_job_id": str,
             "first_seen_at": str,
@@ -740,6 +774,7 @@ class Storage:
             "encrypt_boss_id": str,
             "encrypt_job_id": str,
         }, pk=("conv_id", "account"), if_not_exists=True)
+        self._ensure_conversation_columns()
         self.db.conn.execute(
             "CREATE INDEX IF NOT EXISTS [idx_conv_account] ON [conversations]([account])",
         )
@@ -805,6 +840,23 @@ class Storage:
                 # 可能已存在或并发，忽略
                 log.debug("添加列 %s 失败（可忽略）: %s", col_name, e)
 
+    def _ensure_conversation_columns(self) -> None:
+        """为旧版 conversations 表补齐未读通知去重字段。"""
+        conn = self.db.conn
+        assert conn is not None
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(conversations)").fetchall()}
+        to_add = []
+        if "last_msg_id" not in existing_cols:
+            to_add.append(("last_msg_id", "INTEGER DEFAULT 0"))
+        if "last_notified_msg_key" not in existing_cols:
+            to_add.append(("last_notified_msg_key", "TEXT DEFAULT ''"))
+        for col_name, col_type in to_add:
+            try:
+                conn.execute(f"ALTER TABLE conversations ADD COLUMN {col_name} {col_type}")
+                log.info("已为 conversations 表添加列: %s", col_name)
+            except Exception as e:
+                log.debug("添加列 %s 失败（可忽略）: %s", col_name, e)
+
     @contextmanager
     def transaction(self) -> Iterator[None]:
         """显式事务上下文。异常时自动回滚。"""
@@ -812,5 +864,3 @@ class Storage:
         assert conn is not None
         with conn:
             yield
-
-

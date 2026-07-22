@@ -65,6 +65,9 @@ class UnreadWatcher:
             try:
                 cfg = get_config().schedule
                 count = await header.get_unread_count()
+                if count is None:
+                    await asyncio.sleep(cfg.unread_poll_seconds)
+                    continue
                 self._on_badge_update(account_id, count)
                 await self._handle_count_change(account_id, count)
                 await self._flush_pending(account_id)

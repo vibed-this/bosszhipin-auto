@@ -68,6 +68,9 @@ class BossScrapeChatFlow(BaseFlow[BossChatListPage]):
             new_count, updated_count = storage.conversations.batch_upsert(
                 self._account_id, all_items,
             )
+            unread = storage.conversations.list_unnotified_unread(
+                self._account_id, unread,
+            )
             log.info("DB 写入完成: 新增 %d, 更新 %d", new_count, updated_count)
 
         # 标记缺失聊天为已结束（库里有但本次 dump 无）

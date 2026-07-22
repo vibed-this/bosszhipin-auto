@@ -465,17 +465,17 @@ class BzScheduler:
 
     async def _scrape_chat_account(
         self, account_id: str, trigger: str,
-    ) -> tuple[AccountDoc | None, list[str] | None]:
+    ) -> tuple[AccountDoc | None, list[str] | None, ScrapeChatResult | None]:
         acc = self._storage.accounts.get(account_id)
         if acc is None or not acc.enabled:
-            return None, None
+            return None, None, None
         task = ScrapeChatTask(account_id, self._storage)
         result = await self._run_and_record(trigger, acc, task)
-        return acc, task.format_result(result)
+        return acc, task.format_result(result), result
 
     async def trigger_scrape_chat_account(self, account_id: str) -> None:
         """未读触发：仅扫描指定账号的消息列表。"""
-        acc, lines = await self._scrape_chat_account(account_id, "未读触发")
+        acc, lines, result = await self._scrape_chat_account(account_id, "未读触发")
         if acc is None:
             log.warning("[未读触发] 账号不存在或未启用: %s", account_id)
             return
@@ -484,6 +484,8 @@ class BzScheduler:
                 f"未读触发消息扫描 {datetime.datetime.now():%m-%d %H:%M}",
                 "\n".join([acc.name or acc.account_id] + lines),
             )
+            if result is not None:
+                self._storage.conversations.mark_unread_notified(account_id, result.unread)
         else:
             log.info("[未读触发] %s 无未读消息", acc.name or acc.account_id)
 
@@ -491,15 +493,20 @@ class BzScheduler:
         accounts = self._storage.accounts.list(enabled_only=True)
         agg = NotificationAggregator(get_notifier(), f"消息扫描 {datetime.datetime.now():%m-%d %H:%M}")
         any_unread = False
+        notified: list[tuple[str, list[Any]]] = []
         for acc in accounts:
-            _, lines = await self._scrape_chat_account(acc.account_id, "消息扫描")
+            _, lines, result = await self._scrape_chat_account(acc.account_id, "消息扫描")
             if lines is not None:
                 any_unread = True
                 agg.add_section(acc.name or acc.account_id, lines)
+                if result is not None:
+                    notified.append((acc.account_id, result.unread))
             else:
                 log.info("[消息扫描] %s 无未读消息", acc.name or acc.account_id)
         if any_unread:
             await agg.flush()
+            for account_id, items in notified:
+                self._storage.conversations.mark_unread_notified(account_id, items)
         else:
             log.info("[消息扫描] 全部账号无未读消息，跳过通知")
 
@@ -528,5 +535,4 @@ class BzScheduler:
                 log.info("[消息删拒] %s: %s", acc.name or acc.account_id, ", ".join(lines))
         if not any_deleted:
             log.info("[消息删拒] 全部账号无删除，跳过通知")
-
 

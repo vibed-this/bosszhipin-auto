@@ -382,6 +382,19 @@ class ChatItem(BaseModel):
             return f"https://www.zhipin.com/job_detail/{self.encryptJobId}.html"
         return ""
 
+    @property
+    def notification_key(self) -> str:
+        """用于未读通知去重的稳定消息键。"""
+        if self.lastMsgId:
+            return f"mid:{self.lastMsgId}"
+        payload = "\x1f".join((
+            self.uniqueId,
+            self.time,
+            self.sender,
+            self.lastMsg,
+        ))
+        return "fallback:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
     @classmethod
     def from_vue_row(cls, row: dict[str, Any]) -> ChatItem:
         """从 Vue __vue__.$props.source 构建 ChatItem。
@@ -467,6 +480,7 @@ class ChatItem(BaseModel):
             platform_status=self.status,
             sender=self.sender,
             unread_count=self.unread_count,
+            last_msg_id=self.lastMsgId,
             unique_id=self.uniqueId,
             encrypt_boss_id=self.encryptBossId,
             encrypt_job_id=self.encryptJobId,
