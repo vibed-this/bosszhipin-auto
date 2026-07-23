@@ -69,6 +69,12 @@ JSON.stringify((function() {
 
 _CHAT_DETAIL_SELECTOR = "a.btn-startchat"
 
+_UNSUITABLE_BTN = "span.not-suitable"
+_UNSUITABLE_DIALOG = ".zp-dialog-container"
+_UNSUITABLE_REASON = "li.zp-type-item"
+_UNSUITABLE_CONFIRM = ".zp-btn.zp-btn-primary.zp-btn-sure"
+_UNSUITABLE_CANCEL = ".zp-btn.zp-btn-outline.zp-btn-cancel"
+
 _DIALOG_SELECTORS = [
     ".greet-boss-dialog .cancel-btn",
     ".dialog-close",
@@ -179,6 +185,86 @@ class BossJobListPage(BasePage):
             _EXPECT_TAB,
             post_sleep=1.5,
         )
+
+    async def click_unsuitable_for_current(self, reason_text: str = "重复推荐") -> bool:
+        """对当前选中职位（右侧详情面板）点击不合适并选择原因。"""
+        from bzauto.browser.session import ElementNotFound
+
+        bbox = await self._session.bbox(_UNSUITABLE_BTN, timeout=5)
+        if not bbox or bbox.get("cx", 0) <= 0:
+            log.debug("不合适按钮不可见（可能已标记过或非期望 tab 视图）")
+            return False
+
+        await self._session.click(int(bbox["cx"]), int(bbox["cy"]))
+        await asyncio.sleep(1)
+
+        # 轮询等待弹窗 LI 选项渲染完成
+        # 注意：Vue 关闭 dialog 时并非移除 DOM，而是 display:hide；
+        # 再次打开时新增第二个实例。必须用 querySelectorAll 遍历找可见的。
+        target = None
+        for _ in range(10):
+            result = await self._session.eval_js(f"""
+JSON.stringify((function() {{
+    var dialogs = document.querySelectorAll('{_UNSUITABLE_DIALOG}');
+    var dialog = null;
+    for (var i = 0; i < dialogs.length; i++) {{
+        var r = dialogs[i].getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) {{
+            dialog = dialogs[i];
+            break;
+        }}
+    }}
+    if (!dialog) return null;
+    var items = dialog.querySelectorAll('{_UNSUITABLE_REASON}');
+    if (items.length === 0) return null;
+    for (var i = 0; i < items.length; i++) {{
+        var text = (items[i].textContent || '').trim();
+        if (text.indexOf({json.dumps(reason_text)}) >= 0) {{
+            var r = items[i].getBoundingClientRect();
+            return {{cx: Math.round(r.x + r.width/2), cy: Math.round(r.y + r.height/2)}};
+        }}
+    }}
+    return {{_found: false, texts: Array.from(items).map(function(x) {{ return (x.textContent || '').trim().slice(0, 40); }})}};
+}})())
+""")
+            if result is None:
+                await asyncio.sleep(0.5)
+                continue
+            if isinstance(result, dict):
+                if result.get("cx", 0) > 0:
+                    target = result
+                    break
+                if result.get("_found") is False:
+                    log.warning("弹窗已出现但未找到「%s」，选项: %s",
+                                reason_text, result.get("texts", []))
+                    break
+            await asyncio.sleep(0.5)
+
+        if not target:
+            log.warning("未找到原因选项「%s」，取消对话框", reason_text)
+            cancel = await self._session.bbox(_UNSUITABLE_CANCEL, timeout=3)
+            if cancel:
+                await self._session.click(int(cancel["cx"]), int(cancel["cy"]))
+                await asyncio.sleep(1)
+            return False
+
+        await self._session.click(int(target["cx"]), int(target["cy"]))
+        await asyncio.sleep(0.5)
+
+        try:
+            await self._session.click_element(
+                _UNSUITABLE_CONFIRM,
+                timeout=10,
+                post_sleep=1.5,
+            )
+        except ElementNotFound:
+            log.warning("确认按钮未找到")
+            return False
+
+        # 弹窗关闭后可能有残留 DOM（display:none），等它真正消失
+        await asyncio.sleep(1.5)
+
+        return True
 
     async def dismiss_dialogs(self) -> bool:
         """关闭弹窗。返回 True 继续，False 终止。无弹窗返回 True。"""

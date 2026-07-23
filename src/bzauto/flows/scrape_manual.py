@@ -83,7 +83,13 @@ class BossScrapeManualFlow(BaseFlow[BossJobListPage]):
             seen_duplicate.add(key)
 
             if card.href in seen_hrefs:
-                log.debug("跳过已采集: %s", card.href)
+                log.info("已在库中，标记不合适(重复推荐): %s — %s", card.title, card.company)
+                try:
+                    await self._page.click_card_at(idx)
+                    await asyncio.sleep(1.5)
+                    await self._page.click_unsuitable_for_current("重复推荐")
+                except Exception as e:
+                    log.warning("标记不合适失败: %s - %s", card.title, e)
                 continue
 
             log.info("  [#%d] %s — %s", idx, card.title, card.salary)

@@ -87,11 +87,15 @@ function projectEl(el, all, project) {
 window.__bz.bboxOf = function(select, filter) {
   var all = Array.from(document.querySelectorAll(select));
   var matched = applyFilter(all, filter || {});
-  if (matched.length === 0) return null;
-  var el = matched[0];
-  el.scrollIntoView({ block: 'center', behavior: 'instant' });
-  var rect = el.getBoundingClientRect();
-  return { x: rect.x, y: rect.y, w: rect.width, h: rect.height, cx: Math.round(rect.x + rect.width / 2), cy: Math.round(rect.y + rect.height / 2) };
+  // 过滤掉不可见元素（Vue 隐藏 dialog 后残留 DOM 的 rect 为 0）
+  for (var i = 0; i < matched.length; i++) {
+    var rect = matched[i].getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      matched[i].scrollIntoView({ block: 'center', behavior: 'instant' });
+      return { x: rect.x, y: rect.y, w: rect.width, h: rect.height, cx: Math.round(rect.x + rect.width / 2), cy: Math.round(rect.y + rect.height / 2) };
+    }
+  }
+  return null;
 };
 
 window.__bz.findAll = function(select, filter, project) {
